@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Preface — Agent Algorithmics</title>
+<meta name="description" content="Here is a story you have probably lived through.">
+<meta name="author" content="Madhava Gaikwad">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="book">
+<meta property="og:title" content="Preface — Agent Algorithmics">
+<meta property="og:description" content="Here is a story you have probably lived through.">
+<meta property="og:url" content="https://krimler.github.io/agent-algorithmics/preface.html">
+<link rel="canonical" href="https://krimler.github.io/agent-algorithmics/preface.html">
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Preface", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 0, "url": "https://krimler.github.io/agent-algorithmics/preface.html"}</script>
+
+</head>
+<body>
+<div id="page">
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="notation-and-conventions.html" rel="next">Notation and Conventions &raquo;</a></div>
+<h1>Preface</h1><p>Here is a story you have probably lived through.</p>
+<p>You ship an agent. It works. For two weeks it answers questions, files tickets, and closes them, and everyone is delighted. Then someone runs it against a harder corpus and the token bill triples overnight. You add a cap. Now it stops halfway through the work and returns a confident, useless summary of what it was about to do. You add a retry. Now it books the same meeting twice.</p>
+<p>Nothing in that sequence is a modeling failure. The model was fine at every step. What failed was everything around it. No budget in the state. No reservation for the finish. No idea which actions could be taken back.</p>
+<p>This book is about that machinery.</p>
+<p><em>Who this is for.</em> Engineers and researchers who build, deploy, and operate autonomous or semi-autonomous agents in systems that other people depend on. I assume you are comfortable with algorithms, systems design, and probability, and that you are past the demo stage. You have seen an agent work, and now you need it to keep working on a Tuesday at 3 a.m. Background in distributed systems, control theory, or reinforcement learning will make some chapters easier, though none of it is required.</p>
+<p><em>What this book does.</em> It treats agents as <em>algorithmic objects</em>, stateful decision processes running over time, under uncertainty, spending real money, bound by invariants you can write down. Language models appear here as components, the way a database or a network appears in a systems book. Useful, unreliable in characterized ways, and never the whole system.</p>
+<p>The chapters work through the following.</p>
+<ul>
+<li><p>action selection when the budget is finite and shrinking,</p></li>
+<li><p>verification, abstention, and refusal as control mechanisms with tunable thresholds,</p></li>
+<li><p>speculation, parallelism, and the protocols that decide when work becomes permanent,</p></li>
+<li><p>memory, retrieval, and the management of evidence,</p></li>
+<li><p>capability boundaries and what a tool call is allowed to reach,</p></li>
+<li><p>traces, telemetry, and evaluating a system whose output is a trajectory.</p></li>
+</ul>
+<p>Throughout, the bias is toward designs you can audit, analyze, and reason about when they misbehave at scale.</p>
+<p><em>What this book is not.</em> It is not a prompt engineering guide, a tour of current frameworks, a manifesto, or a tutorial on training foundation models. You will not find advice here that amounts to “use a better model.” When a control problem, an alignment problem, or a cost problem shows up in these pages, it is treated as a systems problem, because that is where the fix lives.</p>
+<p><em>How to read it.</em> Chapters build on each other, and Part I earns the vocabulary the rest of the book spends. If you are shipping something next month, read the worked examples and the design patterns first, then come back for the derivations when a threshold you picked by feel starts misbehaving. If you came for the theory, the models and dominance arguments are stated explicitly and you can read them in order.</p>
+<p>Every chapter closes the same way. The fallacies that cost people real money, a summary, notes on where the ideas came from, and exercises that are meant to be worked rather than admired.</p>
+<p><em>On this revision.</em> Agent research moves fast enough that a year-old book is a historical document. This revision incorporates work published through mid-2026, and in several places that work corrected the earlier account rather than merely adding to it. Rollback turns out to be leakier than Chapter <a href="08-speculation-parallelism-and-commit-protocols.html#ch:speculation">8</a> originally claimed, because clearing a branch from a transcript does not clear it from the serving cache. Benchmark scores turn out to measure the harness as much as the model. Context compaction, the standard fix for long-horizon memory pressure, turns out to quietly delete safety constraints. Where the field proved the first edition wrong, the text says so.</p>
+<p>The thesis survived. Reliable agent behavior comes from explicit control, and it does not emerge from better reasoning.</p>
+
+<div id="bottom"><a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="notation-and-conventions.html" rel="next">Notation and Conventions &raquo;</a><br>&copy; 2026 Madhava Gaikwad. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
+</div>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</body>
+</html>

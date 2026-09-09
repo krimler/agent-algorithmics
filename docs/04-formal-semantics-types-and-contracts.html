@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 4: Formal Semantics, Types, and Contracts — Agent Algorithmics</title>
+<meta name="description" content="Consider a question that most teams cannot currently answer about their own agent: given its configuration, will it terminate? The question concerns the…">
+<meta name="author" content="Madhava Gaikwad">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="book">
+<meta property="og:title" content="Chapter 4: Formal Semantics, Types, and Contracts — Agent Algorithmics">
+<meta property="og:description" content="Consider a question that most teams cannot currently answer about their own agent: given its configuration, will it terminate? The question concerns the…">
+<meta property="og:url" content="https://krimler.github.io/agent-algorithmics/04-formal-semantics-types-and-contracts.html">
+<link rel="canonical" href="https://krimler.github.io/agent-algorithmics/04-formal-semantics-types-and-contracts.html">
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Formal Semantics, Types, and Contracts", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 4, "url": "https://krimler.github.io/agent-algorithmics/04-formal-semantics-types-and-contracts.html"}</script>
+
+</head>
+<body>
+<div id="page">
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="03-a-short-history-of-agents-control-and-commitment.html" rel="prev">&laquo; A Short History of Agents, Control, and Commitment</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="05-cost-models-and-critical-paths.html" rel="next">Cost Models and Critical Paths &raquo;</a></div>
+<h1 id="ch:semantics"><span class="part">Part I: Foundations</span>Chapter 4. Formal Semantics, Types, and Contracts</h1><p>Consider a question that most teams cannot currently answer about their own agent: given its configuration, will it terminate? The question concerns the configuration itself rather than the agent’s behavior on the cases that happened to be tried. The usual answer is a step limit, which is an admission that the question was never asked. A step limit says nothing about whether the agent halts; it says when to stop waiting.</p>
+<p>Chapter <a href="01-terms-and-operational-definitions.html#ch:terms">1</a> defined the vocabulary operationally, in terms of what a system must track and enforce. That is sufficient to build with and insufficient to prove anything. This chapter covers the formal side, which arrived late to agent work and then arrived quickly. Within the past year the field has acquired typed calculi for agent composition, process-calculus semantics for tool protocols, information-flow calculi for injection resistance, and contract frameworks that make resource bounds part of a specification rather than a runtime hope.</p>
+<p>The practical return is narrower than the theory suggests and still worth having. Formalization yields lint rules that catch structural errors before deployment, a precise statement of what a protocol translation loses, and a way to state what an agent is permitted to consume that a scheduler can check.</p>
+<h2 id="why-agent-frameworks-resist-formalization">4.1 Why Agent Frameworks Resist Formalization</h2>
+<p>An ordinary program has a semantics because every construct has defined behavior. Agent frameworks break this in four places, shown in Figure <a href="#fig:four-obstacles">4.1</a>.</p>
+<figure id="fig:four-obstacles">
+<img src="figures/04-formal-semantics-types-and-contracts-fig1-7435ba4d64.png" />
+<figcaption><strong>Figure 4.1.</strong> The four features that separate an agent framework from an ordinary program. A semantics that assumes any of them away describes a different system.</figcaption>
+</figure>
+<p><em>Oracle calls.</em> A model invocation returns an unpredictable value from an enormous space. Its behavior is not a function of its inputs in any usable sense.</p>
+<p><em>Unbounded loops.</em> The ReAct loop runs until the agent decides to stop, and the agent that decides is the same oracle. Termination is not structural.</p>
+<p><em>Probabilistic choice.</em> Sampling makes two runs of the same configuration different programs in the operational sense.</p>
+<p><em>Mutable shared environment.</em> Tools read and write state outside the program, concurrently with other agents.</p>
+<p>Any calculus for agents has to model all four rather than assume them away. That is the bar the recent work clears.</p>
+<h2 id="a-typed-calculus-for-agent-composition">4.2 A Typed Calculus for Agent Composition</h2>
+<p>The most direct result extends the simply typed lambda calculus with exactly these four features. The <span class="math inline">\(\lambda_A\)</span> calculus adds oracle calls, <em>bounded fixpoints</em> to model the ReAct loop, probabilistic choice, and mutable environments [<a href="#ref-lambdaA2026">2</a>]. A bounded fixpoint is a recursive definition that carries an explicit iteration limit, which is how the calculus represents a loop that must stop. On this basis it proves <em>type safety</em>, meaning that a well-typed configuration cannot reach a stuck state, together with termination of the bounded loops.</p>
+<p>The development is mechanized in Coq, a proof assistant that checks each step by machine. This matters because hand proofs about probabilistic effects and mutable state are exactly the kind that appear correct and are not.</p>
+<p>Two consequences should be kept separate. The theoretical consequence is that agent composition admits a semantics at all: given a configuration, one can ask whether it is well formed and whether its loops terminate, and obtain an answer that does not depend on running it. The practical consequence is that lint rules follow from the operational semantics rather than from taste. A rule derived in this way carries a soundness argument, so a warning means something specific. Applied to a corpus of real agent configurations, such rules catch structural errors that no amount of prompt review would surface, because they are properties of the wiring rather than of the text.</p>
+<p>The limitation is the bounded fixpoint. Termination is proved <em>because</em> the loop is bounded, which returns us to the step limit with a better justification. What the calculus adds is that the bound is now part of the type, so a configuration that omits it fails to typecheck instead of running until someone notices.</p>
+<h2 id="process-calculus-for-tool-protocols">4.3 Process Calculus for Tool Protocols</h2>
+<p>Tool protocols are where agents meet the outside world, and the field converged on a small number of them without anyone checking whether they express the same things.</p>
+<p>A <em>process calculus</em> is a formal language for describing concurrent systems that communicate over channels, together with rules for when two such systems count as equivalent. Applying one to two dominant approaches, Schema-Guided Dialogue and the Model Context Protocol, proves them structurally <em>bisimilar</em> under an explicit mapping [<a href="#ref-toolcalculus2026">6</a>]. Bisimilar means that, for practical purposes, each can simulate the other, so a system built on one is not architecturally committed in the way it might appear.</p>
+<p>The more useful half of the result concerns the reverse direction. The inverse mapping is partial and lossy, which means the translation back discards structure. A team building a bridge between protocols can read off precisely what falls through, and it is better to learn that from a proof than from an incident.</p>
+<p>A related line formalizes agent communication itself under resource constraints, producing a calculus that keeps the semantic richness of older agent communication languages while remaining tractable for constrained deployment [<a href="#ref-uacp2026">7</a>]. The recurring theme is that expressiveness and cost are formally related, which is the same trade that Chapter <a href="05-cost-models-and-critical-paths.html#ch:cost">5</a> makes empirically.</p>
+<h2 id="information-flow-and-injection-resistance">4.4 Information Flow and Injection Resistance</h2>
+<p>The most consequential formal result for practitioners concerns prompt injection.</p>
+<p>Chapter <a href="12-capability-boundaries-and-secure-tool-use.html#ch:capability">12</a> argues that the defense against injection is structural: trusted and untrusted content are kept apart so that data cannot become instruction. That argument can now be made precisely. <em>Information-flow control</em> is the discipline of labelling data by its origin and restricting how labels may propagate, so that content from an untrusted source cannot reach a position where it is obeyed. Figure <a href="#fig:ifc">4.2</a> shows the idea. The LLMbda calculus is an untyped call-by-value lambda calculus that models agents, conversations, and information flow on this basis, giving a formal account of provenance-based defenses including the dual-LLM pattern [<a href="#ref-llmbda2026">3</a>].</p>
+<figure id="fig:ifc">
+<img src="figures/04-formal-semantics-types-and-contracts-fig2-e095eb995a.png" />
+<figcaption><strong>Figure 4.2.</strong> Information-flow control. Every value carries a label recording where it came from. A privileged tool call is allowed only when the arguments that matter were derived from trusted input; a value that flowed from a retrieved page cannot become the recipient of an email or the amount of a payment.</figcaption>
+</figure>
+<p>The value of the calculus lies in what it exposes about existing defenses. Flow tracking is easy to implement incorrectly, deliberate relaxations are hard to audit, and the dual-LLM pattern is usually hard-wired into an architecture rather than derived. A calculus makes each of these a statement one can check. A relaxation becomes an explicit rule in the system rather than a comment in a code review.</p>
+<p>The reframing is the thing to retain. Injection resistance is an information-flow property, and information flow is a well-studied area with sixty years of results. Treating injection as a prompt-engineering problem discards all of them.</p>
+<h2 id="contracts-and-resource-bounded-specification">4.5 Contracts and Resource-Bounded Specification</h2>
+<p>Traditional software specifies behavior with contracts: preconditions, postconditions, invariants, and types. Agents typically specify behavior with a paragraph of English in a system prompt. The gap between the two is where governance failures originate. Two frameworks close it from different directions.</p>
+<p><em>Behavioral contracts.</em> An agent behavioral contract is a tuple of preconditions, invariants, governance policies, and recovery mechanisms, all enforceable at runtime rather than merely documentary [<a href="#ref-agentcontracts2026">1</a>]. Because agent behavior is stochastic, satisfaction is defined probabilistically with explicit tolerance parameters. This is the honest formulation; a contract that demanded deterministic satisfaction would be unsatisfiable by construction and therefore useless.</p>
+<p><em>Resource contracts.</em> The older Contract Net Protocol coordinated multi-agent work through contracts for task allocation. Modern agent protocols standardize connectivity and say nothing about consumption. Agent Contracts extend the metaphor to resource-bounded execution, unifying input and output specifications, multi-dimensional resource constraints, temporal boundaries, and success criteria under one lifecycle [<a href="#ref-resourcecontracts2026">4</a>].</p>
+<p>The second framework connects directly to Chapter <a href="06-budget-aware-policies-and-horizon-estimation.html#ch:budgets">6</a>. A budget enforced by the policy is a good design. A budget expressed as a contract is a budget that a scheduler, a marketplace, or a counterparty can also check, which is what is needed once agents consume resources on behalf of parties who are not present.</p>
+<p>Formal verification has begun to reach the packaging layer as well. Work on agent skill manifests defines a verification lattice running from unverified through declared and tested to mechanically checked, and supplies methods for the top level [<a href="#ref-skillverify2026">5</a>]. Given the supply-chain exposure described in Chapter <a href="12-capability-boundaries-and-secure-tool-use.html#ch:capability">12</a>, a mechanically checkable manifest is worth more than a signature from a publisher nobody has audited.</p>
+<h2 id="what-formalization-buys-and-what-it-does-not">4.6 What Formalization Buys, and What It Does Not</h2>
+<p>It is worth being precise about the return.</p>
+<p>Formalization buys <em>structural error detection</em>. Configuration errors that are properties of the wiring are caught statically. This is real, inexpensive, and underused. It buys <em>precise interface claims</em>: bisimilarity results say when two protocols are interchangeable and exactly what a translation loses. It buys <em>auditable relaxations</em>: an information-flow calculus turns “we allow this one exception” into a rule with a name. And it buys <em>checkable resource claims</em>: a resource contract can be enforced by a party other than the agent.</p>
+<p>Formalization does not buy correctness of model outputs. No calculus makes an oracle call return the right answer. Every result in this chapter treats the model as an oracle and reasons about the structure around it, which is the posture the rest of the book takes as well. And it does not remove the need for runtime enforcement. Type safety is a property of configurations, and adversaries are not configurations; Chapters <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a> and <a href="13-alignment-policies-and-constraint-enforcement.html#ch:alignment">13</a> apply in full.</p>
+<p>The honest summary is that formalization moves a class of failures from runtime to compile time, and that class is smaller than the theory papers imply and larger than most teams currently catch.</p>
+<h2 id="summary">4.7 Summary</h2>
+<p>Agent frameworks resisted formalization for four specific reasons: oracle calls, unbounded loops, probabilistic choice, and mutable shared environments. Recent calculi model all four rather than assuming them away.</p>
+<p>Typed composition gives well-formedness and termination as checkable properties, with lint rules derived from the operational semantics instead of from convention. Process-calculus treatment of tool protocols establishes when two protocols are interchangeable and what a translation between them loses. Information-flow calculi restate injection resistance as a provenance property, which connects it to a mature body of work and makes deliberate relaxations auditable.</p>
+<p>Contracts supply the specification layer that agent frameworks lack. Behavioral contracts carry preconditions, invariants, governance, and recovery with probabilistic satisfaction. Resource contracts make consumption bounds externally checkable, which is what Chapter <a href="06-budget-aware-policies-and-horizon-estimation.html#ch:budgets">6</a> requires once budgets cross an organizational boundary.</p>
+<p>None of this makes a model correct. All of it makes the structure around the model something one can reason about before it runs.</p>
+<h2 id="common-misunderstandings">4.8 Common Misunderstandings</h2>
+<p><em>A step limit proves termination.</em> It bounds waiting. A bounded fixpoint in a typed calculus proves termination because the bound is part of the type, and a configuration missing it fails to typecheck [<a href="#ref-lambdaA2026">2</a>].</p>
+<p><em>Two protocols that look similar are interchangeable.</em> They may be bisimilar in one direction and lossy in the other. The direction of translation matters [<a href="#ref-toolcalculus2026">6</a>].</p>
+<p><em>Injection is a prompting problem.</em> It is an information-flow problem, and treating it otherwise discards a mature literature [<a href="#ref-llmbda2026">3</a>].</p>
+<p><em>A contract must be satisfied deterministically.</em> Agent behavior is stochastic, so useful contracts carry explicit probabilistic tolerances [<a href="#ref-agentcontracts2026">1</a>].</p>
+<p><em>The model is the thing to formalize.</em> The oracle is the intractable part. Every result in this chapter formalizes what surrounds the oracle.</p>
+<p><em>Mechanization is optional.</em> Proofs about probabilistic effects and mutable state are exactly where hand arguments fail. Prefer results that carry machine-checked developments.</p>
+<h2 class="unnumbered" id="exercises">Exercises</h2>
+<ol>
+<li><p>Write down your agent’s main loop as a bounded fixpoint. State the bound explicitly and say what happens at the bound. If the answer is “it returns whatever it has,” say what type that value has and whether callers handle it.</p></li>
+<li><p>Take two tool protocols your system speaks. Construct the mapping from one to the other and identify one piece of structure the reverse mapping loses. Compare your answer to the lossiness result in [<a href="#ref-toolcalculus2026">6</a>].</p></li>
+<li><p>Express one injection defense in your system as an information-flow rule over provenance labels. Identify every deliberate relaxation and say who approved it.</p></li>
+<li><p>Write a behavioral contract for one agent, giving preconditions, invariants, governance policies, and recovery. Choose the probabilistic tolerance and justify the number from the cost of violation rather than from convention.</p></li>
+<li><p>Your agent consumes budget on behalf of a customer. Write the resource contract that a third party could check without trusting the agent, following [<a href="#ref-resourcecontracts2026">4</a>]. State which terms a scheduler can enforce and which require post-hoc audit.</p></li>
+<li><p>Argue for or against the claim that a mechanically checked skill manifest is worth more than a publisher signature, using the supply-chain threat model of Chapter <a href="12-capability-boundaries-and-secure-tool-use.html#ch:capability">12</a>.</p></li>
+</ol>
+<h2 class="unnumbered" id="bibliographic-notes">Bibliographic Notes</h2>
+<p>The typed calculus for agent composition, including the Coq development and the derived lint tool, is [<a href="#ref-lambdaA2026">2</a>]. Process-calculus semantics for tool protocols, with the bisimilarity result between Schema-Guided Dialogue and the Model Context Protocol, is [<a href="#ref-toolcalculus2026">6</a>]. Resource-constrained agent communication is formalized in [<a href="#ref-uacp2026">7</a>].</p>
+<p>The LLMbda calculus [<a href="#ref-llmbda2026">3</a>] builds on a long tradition of information-flow control; readers who want the background should start with the classical treatment of provenance and of noninterference, the property that untrusted inputs cannot influence trusted outputs, before reading the agent adaptation.</p>
+<p>Behavioral contracts are introduced in [<a href="#ref-agentcontracts2026">1</a>], and resource-bounded agent contracts in [<a href="#ref-resourcecontracts2026">4</a>], which explicitly positions itself against the Contract Net Protocol of 1980. Formal verification of agent skill manifests appears in [<a href="#ref-skillverify2026">5</a>].</p>
+<p>Readers looking for the limits of runtime formal methods should read Chapter <a href="13-alignment-policies-and-constraint-enforcement.html#ch:alignment">13</a>, which covers a coverage bound on monitor recall that constrains what any fixed-invariant runtime monitor can achieve.</p>
+<h2 class="unnumbered" id="bibliography">Bibliography</h2>
+<ol>
+<li><div id="ref-agentcontracts2026">
+
+</div>
+<p>Varun Pratap Bhardwaj. “Agent Behavioral Contracts: Formal Specification and Runtime Enforcement for Reliable Autonomous AI Agents.” arXiv:2602.22302, 2026.</p></li>
+<li><div id="ref-lambdaA2026">
+
+</div>
+<p>Qin Liu. “$λ_A$: A Typed Lambda Calculus for LLM Agent Composition.” arXiv:2604.11767, 2026.</p></li>
+<li><div id="ref-llmbda2026">
+
+</div>
+<p>Zac Garby et al. “The LLMbda Calculus: AI Agents, Conversations, and Information Flow.” arXiv:2602.20064, 2026.</p></li>
+<li><div id="ref-resourcecontracts2026">
+
+</div>
+<p>Qing Ye and Jing Tan. “Agent Contracts: A Formal Framework for Resource-Bounded Autonomous AI Systems.” arXiv:2601.08815, 2026.</p></li>
+<li><div id="ref-skillverify2026">
+
+</div>
+<p>Alfredo Metere. “Methods for Formal Verification of Agent Skills: Three Layers Toward a Mechanically Checkable Capability-Containment Proof.” arXiv:2605.23951, 2026.</p></li>
+<li><div id="ref-toolcalculus2026">
+
+</div>
+<p>Andreas Schlapbach. “Formal Semantics for Agentic Tool Protocols: A Process Calculus Approach.” arXiv:2603.24747, 2026.</p></li>
+<li><div id="ref-uacp2026">
+
+</div>
+<p>Arnab Mallick and Indraveni Chebolu. “μACP: A Formal Calculus for Expressive, Resource-Constrained Agent Communication.” arXiv:2601.00219, 2026.</p></li>
+</ol>
+
+<div id="bottom"><a href="03-a-short-history-of-agents-control-and-commitment.html" rel="prev">&laquo; A Short History of Agents, Control, and Commitment</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="05-cost-models-and-critical-paths.html" rel="next">Cost Models and Critical Paths &raquo;</a><br>&copy; 2026 Madhava Gaikwad. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
+</div>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</body>
+</html>

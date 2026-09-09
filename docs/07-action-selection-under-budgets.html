@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 7: Action Selection Under Budgets — Agent Algorithmics</title>
+<meta name="description" content="The cheapest possible agent takes no actions. It never overspends, never violates an invariant, never fabricates a citation, and never helps anyone. This…">
+<meta name="author" content="Madhava Gaikwad">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="book">
+<meta property="og:title" content="Chapter 7: Action Selection Under Budgets — Agent Algorithmics">
+<meta property="og:description" content="The cheapest possible agent takes no actions. It never overspends, never violates an invariant, never fabricates a citation, and never helps anyone. This…">
+<meta property="og:url" content="https://krimler.github.io/agent-algorithmics/07-action-selection-under-budgets.html">
+<link rel="canonical" href="https://krimler.github.io/agent-algorithmics/07-action-selection-under-budgets.html">
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Action Selection Under Budgets", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 7, "url": "https://krimler.github.io/agent-algorithmics/07-action-selection-under-budgets.html"}</script>
+
+</head>
+<body>
+<div id="page">
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="06-budget-aware-policies-and-horizon-estimation.html" rel="prev">&laquo; Budget-Aware Policies and Horizon Estimation</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="08-speculation-parallelism-and-commit-protocols.html" rel="next">Speculation, Parallelism, and Commit Protocols &raquo;</a></div>
+<h1 id="ch:action-selection"><span class="part">Part II: Control and Commitment</span>Chapter 7. Action Selection Under Budgets</h1><p>The cheapest possible agent takes no actions. It never overspends, never violates an invariant, never fabricates a citation, and never helps anyone. This is worth stating at the outset because cost-reduction work drifts toward it. Every optimization in Chapter <a href="05-cost-models-and-critical-paths.html#ch:cost">5</a> pushes in the direction of doing less, and taken to its limit that direction ends in an agent that returns “I was unable to complete this task” very economically. The problem this chapter addresses is <em>allocation</em>: given <span class="math inline">\(B_t\)</span> dollars and a set of candidate actions, which ones buy the most progress while leaving enough to finish?</p>
+<p>Everything here follows from treating the budget as a state variable the policy reads, rather than as a ceiling it discovers by hitting. That single change couples present decisions to future feasibility, and the coupling is what makes the problem interesting and what makes greedy selection fail.</p>
+<h2 id="the-action-selection-problem">7.1 The Action Selection Problem</h2>
+<p>At each step <span class="math inline">\(t\)</span> an agent observes the current state <span class="math inline">\(s_t\)</span>, holds a remaining budget <span class="math inline">\(B_t\)</span>, and selects an action <span class="math inline">\(a_t\)</span> from a candidate set <span class="math inline">\(\mathcal{A}_t\)</span>. Actions may be model invocations, tool calls, search operations, verification steps, or synthesis phases, depending on the architecture.</p>
+<p>Without constraints, action selection is a familiar optimization: choose the action of maximum expected utility, <span class="math display">\[a^*_t = \arg\max_{a \in \mathcal{A}_t} \mathbb{E}[U(a) \mid s_t],\]</span> where <span class="math inline">\(U(a)\)</span> stands for task-specific progress, such as correctness, information gain, or reduction in uncertainty.</p>
+<p>Under a budget this formulation is incomplete. A locally optimal action may render future mandatory steps infeasible. To account for this we introduce a reservation term <span class="math inline">\(R_t\)</span>, the resources explicitly set aside for unavoidable future actions such as final synthesis or verification. The constrained objective becomes <span class="math display">\[a^*_t = \arg\max_{a \in \mathcal{A}_t} \mathbb{E}[U(a) \mid s_t] \quad \text{s.t.} \quad c(a) \leq B_t - R_t.\]</span> The constraint creates a dependency across time. Current actions consume budget that future actions may require, and the decision at step <span class="math inline">\(t\)</span> cannot be evaluated in isolation.</p>
+<p><em>Pricing constraints.</em> The trade-offs have a specific shape set by how models are priced. Flagship models cost <span class="math inline">\(10\times\)</span>–<span class="math inline">\(100\times\)</span> lightweight ones, and output tokens cost <span class="math inline">\(2\times\)</span>–<span class="math inline">\(5\times\)</span> input tokens. Both ratios track the underlying compute, which is why they survive every round of price cuts even as absolute numbers fall. The consequence is that the <em>same</em> action can differ in price by two orders of magnitude depending on which model serves it. An agent that ignores this will spend flagship money on a formatting step and then be unable to afford the synthesis that mattered.</p>
+<h3 id="why-greedy-selection-fails">7.1.1 Why Greedy Selection Fails</h3>
+<p>A natural baseline is greedy selection: at each step, choose the action with the highest immediate expected utility. This ignores future costs, and empirically it performs poorly.</p>
+<p>Kapoor et al. [<a href="#ref-kapoor2024agents">7</a>] showed that greedy selection produces highly inefficient cost–accuracy trade-offs. On HumanEval, agents with similar accuracy differed in cost by nearly two orders of magnitude. A baseline agent achieved about 67% accuracy at cost <span class="math inline">\(c\)</span>; a debugging agent (LDB) achieved 76% at cost <span class="math inline">\(14c\)</span>; a jointly optimized agent achieved 74% at cost <span class="math inline">\(2c\)</span>. The greedy strategy corresponds to the LDB configuration: higher immediate utility per step and uncontrolled expenditure. Budget-aware strategies recover most of the accuracy gain (97% of LDB’s performance) at a fraction of the cost (14%).</p>
+<p>The failure generalizes beyond code. Liu et al. [<a href="#ref-liu2025bats">8</a>] showed that increasing tool-call budgets does not improve performance for standard agents. Without explicit budget awareness, agents reach a performance ceiling early and then spend the remaining resources on unproductive exploration. Their Budget Tracker module reduced search and browse calls by 20–40% while maintaining accuracy, purely by making resource usage visible at decision time.</p>
+<p>The underlying issue is temporal myopia. Greedy selection optimizes the current step while the constraint binds across the trajectory. An agent that spends aggressively early cannot afford the steps that close the task, and those closing steps are usually mandatory, which is why the failure is total rather than graceful.</p>
+<h2 id="constrained-optimization-formulation">7.2 Constrained Optimization Formulation</h2>
+<p>Formally, budget-aware action selection is an instance of a constrained Markov decision process (CMDP). A policy <span class="math inline">\(\pi\)</span> maps states and budgets to actions, and the objective is to maximize cumulative utility subject to a global budget constraint: <span class="math display">\[\max_\pi \mathbb{E}\left[\sum_{t=1}^{T} U(a_t, s_t)\right] \quad \text{s.t.} \quad \sum_{t=1}^{T} c(a_t) \leq B_0.\]</span></p>
+<p>CMDPs differ from standard MDPs in that feasibility depends on the entire trajectory rather than on local rewards alone. Altman [<a href="#ref-altman1999constrained">1</a>] showed that such problems can be solved by Lagrangian relaxation: the constrained objective is converted into an unconstrained one by introducing a multiplier <span class="math inline">\(\lambda\)</span>, <span class="math display">\[\mathcal{L}(\pi, \lambda) = \mathbb{E}\left[\sum_{t=1}^{T} U(a_t, s_t) - \lambda \cdot c(a_t)\right] + \lambda B_0.\]</span> The multiplier is the <em>shadow price</em> of the budget; intuitively it converts cost into negative reward. When <span class="math inline">\(\lambda\)</span> is large, cost is expensive and the agent should favor cheap actions even if they are less informative. When <span class="math inline">\(\lambda\)</span> is small, the agent can afford to spend for higher-quality outcomes. The optimal <span class="math inline">\(\lambda\)</span> balances the two so that expected total cost matches the available budget.</p>
+<p>Recent systems operationalize this idea. Damani et al. [<a href="#ref-damani2025ibpo">3</a>] use Inference Budget Policy Optimization to adapt reasoning-trace length to input difficulty, allocating more computation only when it yields sufficient benefit. Chen et al. [<a href="#ref-chen2023frugalgpt">2</a>] avoid explicit multipliers by learning scoring functions that predict whether a cheaper model is sufficient, implicitly approximating the Lagrangian trade-off.</p>
+<p>In practice, computing <span class="math inline">\(\lambda\)</span> exactly is expensive and unstable. The remainder of the chapter develops approximations that are simple, interpretable, and effective in real systems.</p>
+<h2 id="slack-based-action-selection">7.3 Slack-Based Action Selection</h2>
+<p>The Lagrangian formulation is principled and is not directly usable at runtime. Computing or adapting <span class="math inline">\(\lambda\)</span> requires solving a dual optimization problem or learning a policy over long horizons, and both are expensive and brittle.</p>
+<p>We instead approximate the Lagrangian trade-off with a simpler quantity, <em>slack</em>, which measures how much budget remains after accounting for the expected cost of finishing the task. Let <span class="math inline">\(\hat{R}_t\)</span> be the estimated cost of completing the task from state <span class="math inline">\(s_t\)</span>. The slack at time <span class="math inline">\(t\)</span> is <span class="math display">\[\Delta_t = B_t - \hat{R}_t.\]</span> Slack has a direct operational reading. When <span class="math inline">\(\Delta_t\)</span> is large and positive, the agent has surplus resources and can afford expensive, high-quality actions. When <span class="math inline">\(\Delta_t\)</span> is small or negative, the agent is at risk of exhausting its budget before completion and must act conservatively. The approximation replaces an abstract shadow price with a concrete, state-dependent signal that can be computed cheaply. Figure <a href="#fig:slack-damping">7.1</a> shows how the score of an action is damped as slack falls.</p>
+<figure id="fig:slack-damping">
+<img src="figures/07-action-selection-under-budgets-fig1-4a3e718414.png" />
+<figcaption><strong>Figure 7.1.</strong> Slack damping. With positive slack, an action’s value density is scaled down in proportion to how much of the surplus it would consume, reaching full weight once the slack covers its cost. With negative slack, an exponential penalty drives expensive actions out of consideration.</figcaption>
+</figure>
+<figure>
+<img src="figures/07-action-selection-under-budgets-alg1-6dae1ae3d8.png" />
+</figure>
+<p>The algorithm estimates the remaining cost and computes the slack. Actions are scored by <em>value density</em>, the ratio of expected utility to cost, which favors actions that produce more progress per unit spent. Slack then modifies the score. With positive slack, expensive actions are dampened in proportion to how much of the surplus they consume. With negative slack, an exponential penalty sharply reduces the score of costly actions, which produces a regime shift: once the agent is over budget in expectation, it enters a conservation mode in which only low-cost actions remain viable. This approximates the effect of a large Lagrange multiplier without computing one.</p>
+<h2 id="model-cascades-and-routing">7.4 Model Cascades and Routing</h2>
+<p>Budget-aware selection matters most when the actions are model invocations. Modern systems offer families of models with sharply different cost and capability profiles, and using the strongest model everywhere is rarely optimal. Dekoninck et al. [<a href="#ref-dekoninck2025cascade">4</a>] distinguish three architectures for cost-aware model use, shown in Figure <a href="#fig:cascade-routing">7.2</a>: cascading, routing, and cascade routing.</p>
+<figure id="fig:cascade-routing">
+<img src="figures/07-action-selection-under-budgets-fig2-6cb45d433f.png" />
+<figcaption><strong>Figure 7.2.</strong> Three architectures for cost-aware model use. A cascade tries models in cost order and escalates on a low score. A router chooses one model up front. Cascade routing may route to any model at each step and continue conditionally, which removes the requirement that early decisions be final.</figcaption>
+</figure>
+<h3 id="cascading">7.4.1 Cascading</h3>
+<p>In a cascade, queries pass through a sequence of models ordered by increasing cost, and execution stops as soon as a response is judged sufficient. Let <span class="math inline">\(p_i\)</span> be the probability that model <span class="math inline">\(M_i\)</span> produces an acceptable response given that all earlier models failed. The expected cost is <span class="math display">\[\mathbb{E}[C] = c_1 + (1-p_1)c_2 + (1-p_1)(1-p_2)c_3 + \cdots\]</span> Chen et al. [<a href="#ref-chen2023frugalgpt">2</a>] showed that cascading pays when the cheap model succeeds often enough to justify its inclusion, specifically when <span class="math inline">\(p_1 &gt; c_1 / c_2\)</span>. With typical <span class="math inline">\(10\times\)</span> cost ratios, even modest success rates on the cheap model yield substantial savings.</p>
+<figure>
+<img src="figures/07-action-selection-under-budgets-alg2-76d647f852.png" />
+</figure>
+<p>The scoring function <span class="math inline">\(g(q, a)\)</span> estimates response quality without ground truth. It is far cheaper than the models in the cascade, so the decision cost is negligible.</p>
+<h3 id="routing">7.4.2 Routing</h3>
+<p>Routing selects a single model up front from the predicted difficulty of the query. Ong et al. [<a href="#ref-ong2025routellm">10</a>] trained routers on preference data from Chatbot Arena, learning to predict which model would win for a given prompt. Routing avoids the sequential latency of cascades and requires accurate <em>ex-ante</em> difficulty estimation, which is harder than post-hoc verification because the model must be chosen before any output is observed.</p>
+<h3 id="cascade-routing">7.4.3 Cascade Routing</h3>
+<p>Cascade routing [<a href="#ref-dekoninck2025cascade">4</a>] unifies the two. Instead of committing to a single path, the agent may route to any model at each step and continue conditionally, which allows non-monotonic progression across tiers. Empirically, cascade routing improves performance by 4% on RouterBench and 14% on SWE-bench. The gain comes from flexibility: early decisions need not determine later options.</p>
+<h3 id="stepwise-routing">7.4.4 Stepwise Routing</h3>
+<p>The three architectures above share an assumption that has since been challenged: the routing decision happens once, per query. For a single-turn question that is natural. For an agent running a twenty-step trajectory it is a considerable simplification, because difficulty is a property of the step rather than of the task. Locating a file is easy. Reasoning about the concurrency bug inside it is hard. Formatting the patch is easy again.</p>
+<p>Recent work routes at each step. Intermediate reasoning states are assigned to models by predicted difficulty as the trajectory unfolds, so a single task is served by several tiers [<a href="#ref-policyrouting2026">16</a>, <a href="#ref-confrouting2026">15</a>]. The reported savings are substantial, and the reason is structural: within-task difficulty variance is large, and per-query routing has to price the whole trajectory at the rate of its hardest step.</p>
+<p>The cost of stepwise routing is that the decision is made <span class="math inline">\(T\)</span> times rather than once, so the router itself must be very cheap, and routing errors compound across steps in a way that a single mis-route does not.</p>
+<h3 id="the-calibration-problem">7.4.5 The Calibration Problem</h3>
+<p>All of this machinery rests on a quantity so far taken for granted: the score <span class="math inline">\(g(q,a)\)</span>, or the predicted difficulty, that decides whether to escalate.</p>
+<p>A router’s threshold is only meaningful if its confidence scores mean what they claim. A model reporting 0.9 confidence should be right about 90% of the time. Deployed routers largely use uncalibrated scores and per-workload hand-tuned thresholds, which is why they need retuning whenever the traffic shifts [<a href="#ref-ucci2026">18</a>]. Calibrating the uncertainty first, then deriving the escalation threshold from cost, removes the tuning step and transfers across workloads.</p>
+<p>This is the same problem that Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a> treats under abstention, approached from the opposite direction. A cascade’s “escalate to the expensive model” and a gate’s “abstain and ask a human” are the same decision with different fallbacks, and both derive from calibrated confidence and asymmetric costs. A team that has built one has most of the other.</p>
+<p>There is a further complication for agents. Confidence about a <em>token</em> is not confidence about an <em>action</em>, and evidence suggests agents are poor at recognizing when they should not act at all [<a href="#ref-agentabstain2026">11</a>]. A router that escalates well can still be attached to an agent that should have stopped.</p>
+<h3 id="deliberation-at-the-tier-boundary">7.4.6 Deliberation at the Tier Boundary</h3>
+<p>Escalation is binary in the classical cascade: the cheap model either suffices or it does not. On genuinely ambiguous queries this triggers escalation that the expensive model then resolves in a way the cheap one could have, given a second opinion. Running short deliberation among several cheap models at a tier, before escalating, resolves part of that ambiguity at tier-one prices [<a href="#ref-cascadedebate2026">13</a>]. The technique buys most on workloads where ambiguity rather than difficulty drives escalation.</p>
+<h3 id="escalating-during-reasoning">7.4.7 Escalating During Reasoning</h3>
+<p>Routing and cascading sit at opposite ends of a trajectory. A router decides before reasoning begins; a verifier decides after a response is complete. Recent work identifies a third regime that neither covers, in which an agent recognizes mid-reasoning that it is unlikely to succeed and transfers control to a stronger model [<a href="#ref-selfescalate2026">20</a>].</p>
+<p>The formulation is an optimal-stopping problem over a learned competence posterior, an online estimate of eventual success. The important detail is the source of that estimate: its sufficient statistics are learned from labelled trajectories rather than read off raw entropy, which addresses the calibration failure described above and the negative result on entropy-based selection in Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a>. A myopic escalation threshold follows in closed form, with the full policy characterized by dynamic programming.</p>
+<p>The practical significance is in what gets abandoned. Per-query routing pays frontier prices for an entire trajectory because of a difficulty it predicted at step zero. Post-hoc verification pays for a complete wrong answer before deciding to pay again. Escalating mid-reasoning abandons only the prefix, which is the cheapest of the three failure modes.</p>
+<h3 id="deciding-less-often">7.4.8 Deciding Less Often</h3>
+<p>A different lever reduces the number of decisions rather than their cost. ReAct-style protocols issue one primitive action per model round, which enables frequent replanning and spends many rounds on routine sequences that were never in doubt. Emitting variable-length action chunks amortizes the reasoning cost across several actions. The difficulty is learning where chunks should end, since naive training collapses either to single actions or to over-long sequences that cannot react to surprises [<a href="#ref-chunking2026">19</a>].</p>
+<p>Read this against the slack machinery above. Chunking trades responsiveness for cost, so it belongs where the environment is predictable and the budget is tight. On the steps where an agent genuinely needs to look before acting, the per-step decision is what one is paying for.</p>
+<h3 id="constraining-the-candidate-set">7.4.9 Constraining the Candidate Set</h3>
+<p>Selection cost also scales with the number of candidates. An agent presented with sixty tools spends real money reading sixty schemas on every call before it selects anything. Narrowing the candidate set with a cheap retrieval step over tool descriptions cuts that overhead directly [<a href="#ref-autotool2026">12</a>], and it composes with the affordability filter of Chapter <a href="06-budget-aware-policies-and-horizon-estimation.html#ch:budgets">6</a>: filter by relevance, then by what the remaining budget can fund, and only then prompt.</p>
+<h3 id="guarantees-under-a-cost-constraint">7.4.10 Guarantees Under a Cost Constraint</h3>
+<p>Most of the above is heuristic. Where a stronger statement is required, conformal methods provide constrained policy optimization with distribution-free guarantees on the cost–performance trade-off, combining several models under an explicit constraint rather than a tuned threshold [<a href="#ref-conformalcpo2026">14</a>]. The price is the usual one for conformal methods: a calibration set drawn from the deployment distribution, and a guarantee that degrades as that distribution shifts.</p>
+<h2 id="real-world-costaccuracy-trade-offs">7.5 Real-World Cost–Accuracy Trade-offs</h2>
+<p>Budget-aware action selection directly determines whether agents are usable in practice. Kapoor et al. [<a href="#ref-kapoor2024agents">7</a>] introduced cost–accuracy Pareto analysis to make the trade-off explicit: rather than reporting accuracy alone, agents are evaluated as points in a plane with accuracy on one axis and cost on the other. On HumanEval, their analysis showed that many sophisticated agents are dominated by simpler alternatives.</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Agent</th>
+<th style="text-align: right;">Accuracy</th>
+<th style="text-align: right;">Relative cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Baseline (zero-shot)</td>
+<td style="text-align: right;">67.1%</td>
+<td style="text-align: right;">1<span class="math inline">\(\times\)</span></td>
+</tr>
+<tr>
+<td style="text-align: left;">Retry (5<span class="math inline">\(\times\)</span>)</td>
+<td style="text-align: right;">70.2%</td>
+<td style="text-align: right;">2.9<span class="math inline">\(\times\)</span></td>
+</tr>
+<tr>
+<td style="text-align: left;">LDB debugger</td>
+<td style="text-align: right;">76.1%</td>
+<td style="text-align: right;">14<span class="math inline">\(\times\)</span></td>
+</tr>
+<tr>
+<td style="text-align: left;">Joint optimized</td>
+<td style="text-align: right;">74.4%</td>
+<td style="text-align: right;">1.9<span class="math inline">\(\times\)</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The jointly optimized agent reaches 97% of the debugger’s accuracy for 14% of its cost. Debugging works; LDB earns its nine-point gain over the baseline. What it does not earn is <span class="math inline">\(14\times\)</span>. Sophistication added without a resource constraint drifts off the frontier, because every individual addition looks justified when nothing forces it to compete for a fixed pool of money. The discipline is to make every technique bid against the others.</p>
+<h3 id="swe-bench-and-software-engineering">7.5.1 SWE-bench and Software Engineering</h3>
+<p>SWE-bench [<a href="#ref-jimenez2024swebench">6</a>] evaluates agents on real GitHub issues and exposes sharper trade-offs. On the verified subset, frontier systems exceed 70% resolution, while the cost per resolved issue varies by orders of magnitude. The SWE-bench Pro variant, which requires multi-file edits and longer horizons, amplifies this effect. Simple issues are cheap and hard issues are expensive, and without budget-aware routing an agent either overspends on easy cases or underperforms on hard ones. The bimodality makes cost-aware selection essential for deployment.</p>
+<h3 id="budget-aware-test-time-scaling">7.5.2 Budget-Aware Test-Time Scaling</h3>
+<p>Liu et al. [<a href="#ref-liu2025bats">8</a>] formalized budget awareness as an architectural component rather than a training objective. Their BATS framework has three modules: a Budget Tracker that exposes the remaining budget at each step, a Planning Module that adjusts search depth and branching to the budget state, and a Verification Module that decides whether to continue refining a solution or pivot.</p>
+<p>On BrowseComp, BATS nearly doubled accuracy, from 12.6% to 24.6%, on the same resource allocation, with no new tools and no larger model. The gain came from deciding <em>when to stop</em>. The single highest-return control decision in that system was the one about not acting.</p>
+<h3 id="pareto-optimal-search">7.5.3 Pareto-Optimal Search</h3>
+<p>Syftr [<a href="#ref-dey2025syftr">5</a>] addresses budget optimization at the level of system design. Given a space of retrieval strategies, embedding models, and synthesis configurations, it applies Bayesian optimization to identify Pareto-optimal pipelines. Across multiple RAG benchmarks it finds configurations up to <span class="math inline">\(9\times\)</span> cheaper than accuracy-maximized baselines while preserving most of the accuracy.</p>
+<h2 id="remaining-cost-estimation">7.6 Remaining Cost Estimation</h2>
+<p>Slack-based selection depends on an estimate of the cost to complete. A naive estimate extrapolates the total from progress so far, <span class="math inline">\(\hat{C}_{\text{total}} = C_t / p_t\)</span>, and this fails in heterogeneous pipelines. Planning and retrieval are typically cheap; synthesis and verification are expensive; early progress therefore underestimates future cost. A more robust approach decomposes the remaining work by action type.</p>
+<figure>
+<img src="figures/07-action-selection-under-budgets-alg3-366efcd7cf.png" />
+</figure>
+<p>To guard against tail risk, reservations are based on percentiles rather than means. Reserving <span class="math inline">\(\hat{R} + 0.67\hat{\sigma}\)</span> protects against overruns about 75% of the time.</p>
+<h2 id="latency-constraints">7.7 Latency Constraints</h2>
+<p>Money is one budget. Patience is another, and it is the one users enforce. An agent that answers correctly in ninety seconds has failed an interactive request, and the failure is invisible in every cost metric discussed so far. Worse, the user usually retries, so the system pays twice for the answer nobody waited for. Latency needs its own feasibility check alongside the budget filter.</p>
+<p>Following NVIDIA’s benchmarking methodology [<a href="#ref-nvidia2024benchmarking">9</a>], latency decomposes into two phases. <em>Time to first token</em> (TTFT) is the delay before the first output token; it includes queueing and the prefill phase, in which the model reads the entire prompt, and prefill is compute-bound and scales with input length. <em>Inter-token latency</em> (ITL) is the generation speed; the decoding phase is memory-bandwidth-bound, since for each token the model weights and the key/value cache must be streamed from memory. An action is feasible only if <span class="math display">\[t_{\text{queue}} + t_{\text{prefill}}(N_{\text{in}}) + \hat{N}_{\text{out}} \cdot \text{ITL} \leq L_{\max}.\]</span></p>
+<figure>
+<img src="figures/07-action-selection-under-budgets-alg4-004f400610.png" />
+</figure>
+<p>Two consequences follow from the decomposition. Prefill scales with input length, so a large retrieved context is a latency cost as well as a token cost, and trimming retrieval helps both. Decode scales with output length, so capping output length is the single most reliable latency lever available.</p>
+<p>Latency constraints frequently select a weaker model than the budget alone would. That is the correct outcome, and it illustrates why feasibility filters belong before the ranking step: an action that cannot finish in time has no expected value to rank.</p>
+<p>A caution specific to agents: both formulas above are stated in tokens, and for a tool-heavy agent the dominant term is neither prefill nor decode. It is the eight seconds spent waiting on a search API. Budgets defined over elapsed time rather than generated tokens track the real constraint for these workloads [<a href="#ref-timelymachine2026">17</a>], and an agent that parallelizes its tool calls can win more latency than any decoding optimization will give it. Chapter <a href="08-speculation-parallelism-and-commit-protocols.html#ch:speculation">8</a> takes that up.</p>
+<h2 id="the-full-selection-pipeline">7.8 The Full Selection Pipeline</h2>
+<p>Production systems combine estimation, filtering, and scoring into a fast decision pipeline, shown in Figure <a href="#fig:selection-pipeline">7.3</a>.</p>
+<figure id="fig:selection-pipeline">
+<img src="figures/07-action-selection-under-budgets-fig3-38cbd6db1b.png" />
+<figcaption><strong>Figure 7.3.</strong> The selection pipeline. Estimation and reservation set the slack; filtering removes what cannot be afforded or cannot finish in time; ranking chooses among the survivors. The filter runs before the model is prompted.</figcaption>
+</figure>
+<figure>
+<img src="figures/07-action-selection-under-budgets-alg5-243d6c7c40.png" />
+</figure>
+<h2 id="worked-example">7.9 Worked Example</h2>
+<p>Consider an agent with a budget of $0.50 and a latency limit of 30 seconds. After two steps it has spent $0.15 and 10 seconds. The estimated remaining cost is $0.23 with <span class="math inline">\(\sigma = \$0.08\)</span>. Reserving at the 75th percentile gives <span class="math inline">\(R = 0.23 + 0.67 \times 0.08 \approx \$0.28\)</span>. The remaining budget is $0.35, so the slack is $0.07.</p>
+<p>An expensive synthesis action exceeds both the cost and the latency limits and is removed by the filter. A cheap web search preserves budget for the mandatory final steps, and it is selected despite its lower immediate utility. The agent will synthesize from what it has after the search, and the reservation guarantees that the synthesis can be paid for.</p>
+<h2 id="summary">7.10 Summary</h2>
+<p>Budget-aware action selection makes resources part of the state, then filters and ranks against them.</p>
+<p>The pipeline is short. Estimate the cost and latency of each candidate. Filter to what the remaining budget can fund after reserving for the mandatory finish, and to what fits the latency limit. Rank the survivors by expected value, damped by slack so that a shrinking budget shifts the agent into conservation without special-case logic. Slack does the work of the Lagrange multiplier without requiring anyone to compute one.</p>
+<p>Model selection is an action rather than a configuration constant. Cascades exploit the fact that most queries are easy; routing avoids the cascade’s sequential latency at the price of harder <em>ex-ante</em> prediction; cascade routing combines them. The recent movement is toward routing at each step rather than once per query, which exploits within-task difficulty variance that per-query routing has to pay for.</p>
+<p>All of it rests on calibration. An escalation threshold is a claim about what a confidence score means, and if the score is uncalibrated the threshold is a number someone tuned on last month’s traffic. That claim is the subject of Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a>, where the same machinery decides whether to act at all.</p>
+<h2 id="common-misunderstandings">7.11 Common Misunderstandings</h2>
+<p><em>The strongest model is the safe default.</em> It is the expensive default, and frequently a dominated one. Agents built on frontier models are routinely beaten on cost–accuracy by simpler configurations that were forced to justify their spending [<a href="#ref-kapoor2024agents">7</a>].</p>
+<p><em>Accuracy is the metric.</em> Reported without cost, accuracy rewards whoever spent the most. Any agent can buy a few points with more sampling, and unconstrained designs do exactly that [<a href="#ref-liu2025bats">8</a>]. Report the pair.</p>
+<p><em>The router’s confidence score is a probability.</em> Usually it is uncalibrated, which is why cascade thresholds need retuning every time traffic shifts. Calibrate first, then derive the threshold from costs [<a href="#ref-ucci2026">18</a>].</p>
+<p><em>Route once per query.</em> Difficulty varies within a trajectory, often by more than it varies across queries. Per-query routing prices the whole task at the rate of its hardest step [<a href="#ref-policyrouting2026">16</a>].</p>
+<p><em>Plan against mean cost.</em> Reservation is protection against the tail. A reservation computed from the mean fails about half the time by construction.</p>
+<p><em>Filter after generation.</em> The proposal has been paid for, and the model will produce it again. Filter the action set before prompting.</p>
+<p><em>A latency budget counts tokens.</em> For tool-heavy agents most of the wall clock is spent waiting on other services [<a href="#ref-timelymachine2026">17</a>].</p>
+<p><em>Escalate on ambiguity.</em> Ambiguous queries look hard to a confidence score and are often resolvable at the cheap tier with a second opinion [<a href="#ref-cascadedebate2026">13</a>].</p>
+<h2 class="unnumbered" id="exercises">Exercises</h2>
+<ol>
+<li><p>Compute the expected cost of a three-model cascade with <span class="math inline">\(p_1 = 0.6\)</span>, <span class="math inline">\(p_2 = 0.8\)</span>, and costs <span class="math inline">\(c_1 = 1\)</span>, <span class="math inline">\(c_2 = 10\)</span>, <span class="math inline">\(c_3 = 100\)</span>. At what value of <span class="math inline">\(p_1\)</span> does including the first model stop paying?</p></li>
+<li><p>Derive an optimal routing threshold under a cost constraint: given a calibrated difficulty score <span class="math inline">\(d \in [0,1]\)</span>, costs <span class="math inline">\(c_{\text{small}}\)</span> and <span class="math inline">\(c_{\text{large}}\)</span>, and an error cost <span class="math inline">\(c_e\)</span>, find the value of <span class="math inline">\(d\)</span> above which routing to the large model minimizes expected cost.</p></li>
+<li><p>An agent has <span class="math inline">\(B = \$0.80\)</span>, an estimated remaining cost with <span class="math inline">\(\hat{R} = \$0.30\)</span> and <span class="math inline">\(\hat{\sigma} = \$0.12\)</span>, and three candidate actions with (utility, cost) of <span class="math inline">\((6, 0.10)\)</span>, <span class="math inline">\((9, 0.25)\)</span>, and <span class="math inline">\((12, 0.45)\)</span>. Compute the slack with a 75th-percentile reservation and the slack-adjusted density of each action. Which is selected?</p></li>
+<li><p>Implement a Budget Tracker that injects the remaining budget into the prompt, and measure on ten tasks whether the agent’s step count changes.</p></li>
+<li><p>Prove that cascade routing and routing coincide when all models have equal cost, and identify the assumption that makes them differ otherwise.</p></li>
+</ol>
+<h2 class="unnumbered" id="bibliographic-notes">Bibliographic Notes</h2>
+<p>Constrained MDPs were formalized by Altman [<a href="#ref-altman1999constrained">1</a>]. FrugalGPT [<a href="#ref-chen2023frugalgpt">2</a>] introduced learned cascades. Kapoor et al. [<a href="#ref-kapoor2024agents">7</a>] established cost–accuracy Pareto analysis.</p>
+<p>Model routing and cascading were unified by Dekoninck et al. [<a href="#ref-dekoninck2025cascade">4</a>]. Budget-aware scaling was introduced by Liu et al. [<a href="#ref-liu2025bats">8</a>]. Syftr [<a href="#ref-dey2025syftr">5</a>] applies Bayesian optimization to Pareto search.</p>
+<h2 class="unnumbered" id="bibliography">Bibliography</h2>
+<ol>
+<li><div id="ref-altman1999constrained">
+
+</div>
+<p>E. Altman. <em>Constrained Markov Decision Processes</em>. Chapman and Hall/CRC, 1999.</p></li>
+<li><div id="ref-chen2023frugalgpt">
+
+</div>
+<p>L. Chen, M. Zaharia, and J. Zou. FrugalGPT: How to use large language models while reducing cost and improving performance. In <em>Advances in Neural Information Processing Systems</em>, 2023.</p></li>
+<li><div id="ref-damani2025ibpo">
+
+</div>
+<p>M. Damani, I. Shenfeld, A. Peng, A. Bobu, and J. Andreas. Learning how hard to think: Input-adaptive allocation of LM computation. In <em>International Conference on Learning Representations</em>, 2025.</p></li>
+<li><div id="ref-dekoninck2025cascade">
+
+</div>
+<p>J. Dekoninck, M. Baader, and M. Vechev. A unified approach to routing and cascading for LLMs. In <em>International Conference on Machine Learning</em>, 2025.</p></li>
+<li><div id="ref-dey2025syftr">
+
+</div>
+<p>D. Dey et al. syftr: Pareto-optimal generative AI. <em>arXiv preprint arXiv:2505.20266</em>, 2025.</p></li>
+<li><div id="ref-jimenez2024swebench">
+
+</div>
+<p>C. E. Jimenez, J. Yang, A. Wettig, S. Yao, K. Pei, O. Press, and K. Narasimhan. SWE-bench: Can language models resolve real-world GitHub issues? In <em>International Conference on Learning Representations</em>, 2024.</p></li>
+<li><div id="ref-kapoor2024agents">
+
+</div>
+<p>S. Kapoor, B. Stroebl, Z. S. Siegel, N. Nadgir, and A. Narayanan. AI agents that matter. In <em>International Conference on Machine Learning</em>, 2025.</p></li>
+<li><div id="ref-liu2025bats">
+
+</div>
+<p>T. Liu et al. Budget-aware tool-use enables effective agent scaling. <em>arXiv preprint arXiv:2511.17006</em>, 2025.</p></li>
+<li><div id="ref-nvidia2024benchmarking">
+
+</div>
+<p>NVIDIA. LLM inference benchmarking: Fundamental concepts. <em>NVIDIA Technical Blog</em>, 2024.</p></li>
+<li><div id="ref-ong2025routellm">
+
+</div>
+<p>I. Ong, A. Almahairi, V. Wu, W. Chiang, T. Wu, J. E. Gonzalez, M. W. Kadous, and I. Stoica. RouteLLM: Learning to route LLMs with preference data. In <em>International Conference on Learning Representations</em>, 2025.</p></li>
+<li><div id="ref-agentabstain2026">
+
+</div>
+<p>Xun Liu et al. “AgentAbstain: Do LLM Agents Know When Not to Act?.” arXiv:2607.10059, 2026.</p></li>
+<li><div id="ref-autotool2026">
+
+</div>
+<p>Jingyi Jia and Qinbin Li. “AutoTool: Efficient Tool Selection for Large Language Model Agents.” arXiv:2511.14650, 2025. AAAI 2026.</p></li>
+<li><div id="ref-cascadedebate2026">
+
+</div>
+<p>Raeyoung Chang et al. “CascadeDebate: Multi-Agent Deliberation for Cost-Aware LLM Cascades.” arXiv:2604.12262, 2026.</p></li>
+<li><div id="ref-conformalcpo2026">
+
+</div>
+<p>Wenwen Si et al. “Conformal Constrained Policy Optimization for Cost-Effective LLM Agents.” arXiv:2511.11828, 2025.</p></li>
+<li><div id="ref-confrouting2026">
+
+</div>
+<p>Sangmook Lee et al. “Confidence-Guided Stepwise Model Routing for Cost-Efficient Reasoning.” arXiv:2511.06190, 2025.</p></li>
+<li><div id="ref-policyrouting2026">
+
+</div>
+<p>Wenwen Si et al. “Policy-Guided Stepwise Model Routing for Cost-Effective Reasoning.” arXiv:2605.06116, 2026.</p></li>
+<li><div id="ref-timelymachine2026">
+
+</div>
+<p>Yichuan Ma et al. “Timely Machine: Awareness of Time Makes Test-Time Scaling Agentic.” arXiv:2601.16486, 2026.</p></li>
+<li><div id="ref-ucci2026">
+
+</div>
+<p>Varun Kotte. “UCCI: Calibrated Uncertainty for Cost-Optimal LLM Cascade Routing.” arXiv:2605.18796, 2026.</p></li>
+<li><div id="ref-chunking2026">
+
+</div>
+<p>Yanting Yang et al. “Act More, Decide Less: Skill-Guided Adaptive Action Chunking for Long-Horizon LLM Agents.” arXiv:2609.02042, 2026. EMNLP 2026.</p></li>
+<li><div id="ref-selfescalate2026">
+
+</div>
+<p>Nadeem Shaikh. “Knowing When to Ask for Help: Bayesian Self-Escalation in Hierarchical LLM Agents.” arXiv:2608.24087, 2026.</p></li>
+</ol>
+
+<div id="bottom"><a href="06-budget-aware-policies-and-horizon-estimation.html" rel="prev">&laquo; Budget-Aware Policies and Horizon Estimation</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="08-speculation-parallelism-and-commit-protocols.html" rel="next">Speculation, Parallelism, and Commit Protocols &raquo;</a><br>&copy; 2026 Madhava Gaikwad. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
+</div>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</body>
+</html>

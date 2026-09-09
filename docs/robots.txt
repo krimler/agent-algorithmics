@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://krimler.github.io/agent-algorithmics/sitemap.xml

@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 6: Budget-Aware Policies and Horizon Estimation — Agent Algorithmics</title>
+<meta name="description" content="Give an agent twice the budget and it will usually get no further. Often it gets no further at all.">
+<meta name="author" content="Madhava Gaikwad">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="book">
+<meta property="og:title" content="Chapter 6: Budget-Aware Policies and Horizon Estimation — Agent Algorithmics">
+<meta property="og:description" content="Give an agent twice the budget and it will usually get no further. Often it gets no further at all.">
+<meta property="og:url" content="https://krimler.github.io/agent-algorithmics/06-budget-aware-policies-and-horizon-estimation.html">
+<link rel="canonical" href="https://krimler.github.io/agent-algorithmics/06-budget-aware-policies-and-horizon-estimation.html">
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Budget-Aware Policies and Horizon Estimation", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 6, "url": "https://krimler.github.io/agent-algorithmics/06-budget-aware-policies-and-horizon-estimation.html"}</script>
+
+</head>
+<body>
+<div id="page">
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="05-cost-models-and-critical-paths.html" rel="prev">&laquo; Cost Models and Critical Paths</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="07-action-selection-under-budgets.html" rel="next">Action Selection Under Budgets &raquo;</a></div>
+<h1 id="ch:budgets"><span class="part">Part I: Foundations</span>Chapter 6. Budget-Aware Policies and Horizon Estimation</h1><p>Give an agent twice the budget and it will usually get no further. Often it gets no further at all.</p>
+<p>This is one of the more useful empirical findings of the past two years, and it deserves some attention, because it contradicts the natural assumption that resources are the binding constraint. A budget-unaware agent spends early on whatever looks locally promising, reaches a performance ceiling well before the budget is exhausted, and then spends the remainder on exploration that changes nothing. Doubling its allowance doubles the waste. Agents that can <em>see</em> their budget continue to convert additional resources into additional accuracy, and reach comparable accuracy on far less [<a href="#ref-bats2025">3</a>, <a href="#ref-budgettooluse2026">11</a>]. Figure <a href="#fig:budget-scaling">6.1</a> shows the shape of the two curves.</p>
+<figure id="fig:budget-scaling">
+<img src="figures/06-budget-aware-policies-and-horizon-estimation-fig1-891ad87340.png" />
+<figcaption><strong>Figure 6.1.</strong> Accuracy as a function of budget, in the shape reported by [<a href="#ref-bats2025">3</a>, <a href="#ref-budgettooluse2026">11</a>]. The budget-blind agent reaches its ceiling with most of the budget unspent; the budget-aware agent, with the same model and tools, continues to improve as the allowance grows.</figcaption>
+</figure>
+<p>Same models, same tools. The difference is that one of them carries the budget in its state.</p>
+<p>Chapter <a href="05-cost-models-and-critical-paths.html#ch:cost">5</a> treated cost as something to analyze. This chapter treats it as something to control, which requires three things the previous chapter did not: a policy that conditions on the remaining budget, an estimate of how much work is left, and a rule for reserving against that estimate.</p>
+<h2 id="budget-aware-policies">6.1 Budget-Aware Policies</h2>
+<p>A budget-blind agent selects actions on the basis of immediate relevance or predicted utility alone. It may invoke expensive tools repeatedly early in execution and discover only near the end that the remaining budget cannot finish the task, at which point no corrective action is possible.</p>
+<p>A budget-aware agent tracks what is left, forms an expectation about what remains to be paid, and tightens its action selection as the difference shrinks. It explores early and shifts toward synthesis and verification on cheaper models as the budget thins.</p>
+<p>The metric that improves is worth noting. Lower cost is the obvious benefit and the smaller one. The larger benefit is a higher <em>completion</em> rate, because the failure being fixed is arriving at the final synthesis step with nothing left to pay for it, rather than overspending as such.</p>
+<h3 id="formal-framework">6.1.1 Formal Framework</h3>
+<p>A budget-aware policy conditions on the remaining budget. The policy <span class="math inline">\(\pi(a \mid s, B)\)</span> takes both the agent’s state <span class="math inline">\(s\)</span> and the remaining budget <span class="math inline">\(B\)</span>. Let <span class="math inline">\(B_0\)</span> be the initial budget and <span class="math inline">\(c(a)\)</span> the cost of action <span class="math inline">\(a\)</span>. After actions <span class="math inline">\(a_1, \ldots, a_{t-1}\)</span>, the remaining budget is <span class="math display">\[B_t = B_0 - \sum_{i=1}^{t-1} c(a_i),\]</span> and the policy must satisfy the expected budget constraint <span class="math display">\[\mathbb{E}_\pi\!\left[\sum_{t=1}^{T} c(a_t)\right] \leq B_0.\]</span> The constraint couples decisions across time, which is what makes the problem hard. Spend aggressively now and later steps become infeasible. Hoard, and the agent returns a weak answer while holding budget it was meant to spend. Both are failures, and both have the same remedy: the policy has to price the option value of the remaining budget as well as the value of the next action.</p>
+<h3 id="budget-states-and-thresholds">6.1.2 Budget States and Thresholds</h3>
+<p>To make budget reasoning tractable, it is useful to discretize the remaining budget into a few coarse states. A representative scheme:</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Budget state</th>
+<th style="text-align: center;">Remaining</th>
+<th style="text-align: left;">Policy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Abundant</td>
+<td style="text-align: center;"><span class="math inline">\(&gt; 70\%\)</span></td>
+<td style="text-align: left;">Full action space available</td>
+</tr>
+<tr>
+<td style="text-align: left;">Adequate</td>
+<td style="text-align: center;"><span class="math inline">\(40\%\)</span>–<span class="math inline">\(70\%\)</span></td>
+<td style="text-align: left;">Prefer moderate-cost actions</td>
+</tr>
+<tr>
+<td style="text-align: left;">Tight</td>
+<td style="text-align: center;"><span class="math inline">\(15\%\)</span>–<span class="math inline">\(40\%\)</span></td>
+<td style="text-align: left;">Restrict to low-cost actions</td>
+</tr>
+<tr>
+<td style="text-align: left;">Critical</td>
+<td style="text-align: center;"><span class="math inline">\(&lt; 15\%\)</span></td>
+<td style="text-align: left;">Minimal actions only</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>These thresholds are task-dependent. For tasks with predictable step counts and uniform costs, evenly spaced thresholds suffice. Tasks with high variance in step cost require more conservative thresholds to avoid a late collapse.</p>
+<p>A more principled calibration compares the remaining budget to the estimated remaining cost. Let <span class="math inline">\(M\)</span> be the median estimate of the remaining cost. The ratio <span class="math inline">\(B/M\)</span> is a normalized signal, and Figure <a href="#fig:budget-bands">6.2</a> shows the four states in its terms: abundant when <span class="math inline">\(B/M &gt; 2\)</span>, adequate when <span class="math inline">\(1 &lt; B/M \leq 2\)</span>, tight when <span class="math inline">\(0.5 &lt; B/M \leq 1\)</span>, and critical when <span class="math inline">\(B/M \leq 0.5\)</span>. This formulation adapts across tasks with different absolute cost scales, since “tight” means the same thing on a three-step lookup and a thirty-step investigation.</p>
+<figure id="fig:budget-bands">
+<img src="figures/06-budget-aware-policies-and-horizon-estimation-fig2-3307f338c3.png" />
+<figcaption><strong>Figure 6.2.</strong> Budget states normalized by the estimated remaining cost. The boundaries are ratios rather than absolute amounts, so the same policy applies to tasks of very different size.</figcaption>
+</figure>
+<h3 id="action-space-filtering">6.1.3 Action Space Filtering</h3>
+<p>Budget awareness is most effective when it is enforced before generation. Let <span class="math inline">\(\hat{c}(a)\)</span> be the estimated cost of action <span class="math inline">\(a\)</span> and <span class="math inline">\(\hat{R}\)</span> the estimated remaining cost to complete the task. The affordable action set is <span class="math display">\[\mathcal{A}_{\text{afford}}(B, \hat{R}) = \{ a \in \mathcal{A} : \hat{c}(a) \leq B - \hat{R} + \epsilon \},\]</span> where <span class="math inline">\(B - \hat{R}\)</span> is the available slack and <span class="math inline">\(\epsilon\)</span> permits a limited overrun for unusually valuable actions.</p>
+<p>The important word is <em>before</em>. Filter the action set before prompting the model rather than after it has proposed something. Post-hoc rejection has already paid for the generation, and it leaves the model to re-propose from the same distribution that produced the unaffordable action, so the agent pays repeatedly to be told no. Removing the option from the prompt costs nothing and cannot be argued with.</p>
+<h3 id="the-budget-tracker-module">6.1.4 The Budget Tracker Module</h3>
+<p>The Budget Tracker [<a href="#ref-bats2025">3</a>] is a lightweight mechanism that injects explicit budget state into the model’s context at every step. A typical injection reads:</p>
+<pre><code>Budget Status:
+- Initial budget: 20 tool calls
+- Used: 7 tool calls
+- Remaining: 13 tool calls (65%)
+
+Budget Policy:
+- Above 50%: Use tools freely for exploration
+- 25-50%: Focus on high-value tool calls
+- Below 25%: Reserve for essential verification
+- Below 10%: Conclude with available evidence</code></pre>
+<p>Despite its simplicity, the intervention produces substantial improvements:</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Metric</th>
+<th style="text-align: center;">ReAct</th>
+<th style="text-align: center;">ReAct + Budget Tracker</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Search calls</td>
+<td style="text-align: center;">100%</td>
+<td style="text-align: center;">59.6% (<span class="math inline">\(-\)</span>40.4%)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Browse calls</td>
+<td style="text-align: center;">100%</td>
+<td style="text-align: center;">80.1% (<span class="math inline">\(-\)</span>19.9%)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Total cost</td>
+<td style="text-align: center;">100%</td>
+<td style="text-align: center;">68.7% (<span class="math inline">\(-\)</span>31.3%)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Accuracy</td>
+<td style="text-align: center;">Baseline</td>
+<td style="text-align: center;">Comparable</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The scaling behavior matters more than the savings. The baseline plateaus: past a point, extra budget produces no extra accuracy. With the tracker in place, accuracy keeps rising as the budget grows, which is the property that makes the budget a useful knob for an operator to turn. Related work on budget-aware tool use reports the same shape on agentic benchmarks, together with a finding worth underlining: much of the gain comes from knowing when to <em>stop</em>, rather than from any new capability [<a href="#ref-budgettooluse2026">11</a>].</p>
+<h3 id="budget-reservation">6.1.5 Budget Reservation</h3>
+<p>A central problem is how much budget to reserve for future steps. A naive reservation multiplies the expected remaining steps <span class="math inline">\(T\)</span> by the average per-step cost <span class="math inline">\(\bar{c}\)</span>, giving <span class="math inline">\(\text{Reserve} = T \cdot \bar{c}\)</span>. Because both quantities are uncertain, robust systems reserve a higher percentile of the remaining-cost distribution, such as the 75th. This reduces the chance of failure at the cost of occasional under-utilization. Figure <a href="#fig:reservation">6.3</a> shows how the budget divides.</p>
+<figure id="fig:reservation">
+<img src="figures/06-budget-aware-policies-and-horizon-estimation-fig3-c0c800a8fb.png" />
+<figcaption><strong>Figure 6.3.</strong> Budget reservation. Of the remaining budget <span class="math inline">\(B_t\)</span>, the reserve <span class="math inline">\(R_t\)</span> is held back for the mandatory finish; only the slack <span class="math inline">\(\Delta_t = B_t - R_t\)</span> is available for the next action.</figcaption>
+</figure>
+<p>Adaptive reservation recomputes the estimate after each step:</p>
+<pre><code>def compute_available_budget(remaining_budget, expected_remaining):
+    p75_remaining = percentile_75(expected_remaining)
+    reserve = p75_remaining
+    available = remaining_budget - reserve
+    return max(available, min_action_cost)</code></pre>
+<h2 id="horizon-estimation">6.2 Horizon Estimation</h2>
+<p>Reservation depends on an estimate of how much work remains, and for open-ended tasks that estimate is difficult.</p>
+<h3 id="estimation-approaches">6.2.1 Estimation Approaches</h3>
+<p>Several signals contribute. <em>Extrapolation from past spending</em> assumes future steps resemble past steps, and fails when the phases of a task differ in cost. <em>Task-type classification</em> draws on historical distributions:</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Task type</th>
+<th style="text-align: center;">Typical steps</th>
+<th style="text-align: center;">Median cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Simple factual</td>
+<td style="text-align: center;">2–4</td>
+<td style="text-align: center;">$0.05</td>
+</tr>
+<tr>
+<td style="text-align: left;">Research question</td>
+<td style="text-align: center;">5–10</td>
+<td style="text-align: center;">$0.25</td>
+</tr>
+<tr>
+<td style="text-align: left;">Complex coding</td>
+<td style="text-align: center;">10–30</td>
+<td style="text-align: center;">$0.80</td>
+</tr>
+<tr>
+<td style="text-align: left;">Multi-document synthesis</td>
+<td style="text-align: center;">8–15</td>
+<td style="text-align: center;">$0.45</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p><em>Progress indicators</em> exploit task-specific signals such as tests passed or sources collected. <em>Model-based prediction</em> asks the model to estimate the remaining work; when the model understands the task structure, its estimates are often informative. A <em>combined estimate</em> weights these signals, for instance 30% task-type prior, 40% progress indicators, and 30% model estimate.</p>
+<h3 id="per-step-cost-prediction">6.2.2 Per-Step Cost Prediction</h3>
+<p>Different step types have distinct cost distributions:</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Step type</th>
+<th style="text-align: center;">Median</th>
+<th style="text-align: center;">P75</th>
+<th style="text-align: center;">P95</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Planning</td>
+<td style="text-align: center;">$0.02</td>
+<td style="text-align: center;">$0.03</td>
+<td style="text-align: center;">$0.05</td>
+</tr>
+<tr>
+<td style="text-align: left;">Retrieval</td>
+<td style="text-align: center;">$0.01</td>
+<td style="text-align: center;">$0.02</td>
+<td style="text-align: center;">$0.04</td>
+</tr>
+<tr>
+<td style="text-align: left;">Tool calls</td>
+<td style="text-align: center;">$0.01</td>
+<td style="text-align: center;">$0.02</td>
+<td style="text-align: center;">$0.08</td>
+</tr>
+<tr>
+<td style="text-align: left;">Synthesis</td>
+<td style="text-align: center;">$0.05</td>
+<td style="text-align: center;">$0.08</td>
+<td style="text-align: center;">$0.15</td>
+</tr>
+<tr>
+<td style="text-align: left;">Verification</td>
+<td style="text-align: center;">$0.02</td>
+<td style="text-align: center;">$0.03</td>
+<td style="text-align: center;">$0.06</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>These distributions support probabilistic reservation rather than point estimates.</p>
+<h3 id="bayesian-updating">6.2.3 Bayesian Updating</h3>
+<p>As execution proceeds, the estimate should be revised. Nearest-neighbor matching against historical trajectories captures the correlation between what has been spent and what remains:</p>
+<pre><code>def update_cost_estimate(spent, steps_taken, historical_trajectories):
+    similar = [t for t in historical_trajectories
+               if abs(t.cost_at_step[steps_taken] - spent) &lt; tolerance]
+    remaining_costs = [t.total_cost - spent for t in similar]
+    return {
+        &#39;median&#39;: np.median(remaining_costs),
+        &#39;p75&#39;: np.percentile(remaining_costs, 75),
+        &#39;p95&#39;: np.percentile(remaining_costs, 95)
+    }</code></pre>
+<h2 id="budget-aware-test-time-scaling-bats">6.3 Budget-Aware Test-Time Scaling (BATS)</h2>
+<p><em>Test-time scaling</em> is the practice of spending additional computation at inference time, in the form of more reasoning tokens, more sampled trajectories, or more verification passes, to buy accuracy that a single cheap pass would not deliver. It is the main way an agent converts budget into quality, which makes it both the natural place to spend a budget and the natural place to waste one.</p>
+<p>BATS [<a href="#ref-bats2025">3</a>] integrates budget tracking, planning, and verification into a single execution loop. The system has three components: a Budget Tracker, a Planning Module that allocates budget across subgoals, and a Verification Module that decides whether to continue, restart, or stop. It maintains multiple reasoning trajectories and reallocates budget among them:</p>
+<pre><code>def bats_loop(question, budget):
+    trajectories = []
+    best_answer = None
+    while budget &gt; 0:
+        plan = planning_module(question, budget, trajectories)
+        trajectory = execute_plan(plan)
+        budget -= trajectory.cost
+        decision = verification_module(trajectory, budget)
+        if decision == &#39;accept&#39;:
+            trajectories.append(trajectory)
+            if trajectory.answer_quality &gt; best_threshold:
+                best_answer = trajectory.answer
+        elif decision == &#39;restart&#39;:
+            trajectories.append(trajectory)
+            continue
+    return select_best_answer(trajectories)</code></pre>
+<h3 id="early-stopping">6.3.1 Early Stopping</h3>
+<p>Agents overrun. Left alone, they keep taking steps well past the point where additional work changes the answer, because nothing in a plain ReAct loop rewards stopping. Three criteria are worth building in explicitly.</p>
+<p><em>Confidence.</em> Stop when the answer is stable across independent trajectories. Agreement between two cheap runs is stronger evidence than one expensive run’s self-reported certainty. Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a> makes this point carefully, since self-reported confidence is poorly calibrated.</p>
+<p><em>Diminishing returns.</em> Track the change in the answer per unit spent. When three consecutive steps leave the answer materially unchanged, further steps are purchasing variance.</p>
+<p><em>Infeasibility.</em> Stop when <span class="math inline">\(B_t\)</span> can no longer fund a meaningful improvement plus the mandatory finish. An agent with enough budget for one retrieval and not for the synthesis that would use it should synthesize now.</p>
+<p>Stopping is where budget awareness pays off most visibly, and it is the least implemented of the three because it feels like giving up.</p>
+<h2 id="cost-controllable-multi-agent-systems">6.4 Cost-Controllable Multi-Agent Systems</h2>
+<p>Multi-agent designs change the cost structure rather than merely scaling it. Work runs in parallel, which shortens the critical path, and agents exchange messages, which lengthens the bill. The second effect is easy to underestimate: every message is context that some other agent pays to read, on every subsequent call.</p>
+<h3 id="budget-allocation-across-agents">6.4.1 Budget Allocation Across Agents</h3>
+<p>Given a total budget <span class="math inline">\(B_0\)</span> and <span class="math inline">\(k\)</span> agents, allocation can be uniform, priority-weighted, or dynamic with reclamation from agents that finish early. Uniform allocation is the common default and is usually wrong, because agent roles have very different cost profiles; a planner that emits 200 tokens and a research sub-agent that reads forty documents should not receive equal shares.</p>
+<p>Dynamic reallocation is worth its complexity when the variance across agents is high. Reserve a central pool, allocate conservatively, and let agents request more against demonstrated progress. This converts allocation from a guess made before the task into a decision informed by how the task is going [<a href="#ref-progrouter2026">19</a>].</p>
+<h3 id="topology-as-a-cost-variable">6.4.2 Topology as a Cost Variable</h3>
+<p>The communication graph is a design parameter with a price. A fully connected team of <span class="math inline">\(k\)</span> agents carries <span class="math inline">\(O(k^2)\)</span> message paths; a hierarchy carries <span class="math inline">\(O(k)\)</span> and loses some cross-agent information.</p>
+<p>AgentBalance [<a href="#ref-agentbalance2025">1</a>] separates two decisions that are usually entangled: which backbone model each role gets, and how the roles are wired together. Choosing backbones first and then synthesizing the topology under the remaining budget outperforms joint search, and the gap widens as budgets tighten. Related work assigns heterogeneous models at the level of individual edges in the collaboration graph rather than per agent, on the observation that some links carry cheap coordination traffic and others carry the reasoning that justifies a frontier model [<a href="#ref-scmas2026">20</a>].</p>
+<p>There is a prior question that enthusiasm for multi-agent designs tends to skip: whether to parallelize at all. Partitioning a task across agents pays only when the subtasks are genuinely separable, and cohesion-aware analysis of multi-agent coding shows the communication overhead consuming the parallelism gain once subtasks share enough context [<a href="#ref-cohesion2026">12</a>]. Chapter <a href="16-case-studies-and-design-patterns.html#ch:patterns">16</a> returns to this with case studies. The rule of thumb is that if two agents need to keep telling each other what they found, they should have been one agent.</p>
+<h3 id="cost-controllable-training">6.4.3 Cost-Controllable Training</h3>
+<p>Where the policy is trainable, cost can enter the objective directly, <span class="math inline">\(R = R_{\text{task}} - \lambda C\)</span>. This is the Lagrangian of Chapter <a href="02-mathematical-foundations.html#ch:math">2</a> appearing as a reward-shaping term, and <span class="math inline">\(\lambda\)</span> carries the same meaning: the shadow price of the budget.</p>
+<p>Two cautions apply. A single <span class="math inline">\(\lambda\)</span> fixed at training time is correct for one operating point, and deployment rarely stays there, so budget-conditioned policies that take <span class="math inline">\(B\)</span> as an input generalize better than policies trained at one price. And this book treats training as out of scope for enforcement: a learned cost preference is a proposal mechanism, so the hard budget still needs the filtering and reservation machinery above.</p>
+<h2 id="context-management-for-cost-control">6.5 Context Management for Cost Control</h2>
+<p>For long-horizon agents, context growth is the dominant cost, because history is replayed on every call. Three mechanisms address it, and all three have side effects that the cost literature reports less enthusiastically than the savings.</p>
+<p><em>Periodic summarization.</em> SLIM [<a href="#ref-slim2025">8</a>] compresses older context while preserving recent detail. It is effective and cheap.</p>
+<p><em>Communication pruning.</em> AgentPrune [<a href="#ref-agentprune2025">2</a>] removes low-value inter-agent messages, targeting the <span class="math inline">\(O(k^2)\)</span> traffic above.</p>
+<p><em>Observation masking.</em> Tool outputs are bulky and mostly unread. Masking the middles of long observations while keeping their heads and tails recovers most of the tokens at almost no cost in quality [<a href="#ref-observationmasking2025">7</a>].</p>
+<p>Budget-aware context management closes the loop by treating the context window itself as a budgeted resource, deciding what to retain against an explicit allowance rather than a fixed heuristic trigger [<a href="#ref-contextbudget2026">15</a>]. Later work makes the context programmatically revisable, so that a compaction decision can be undone when it turns out to have dropped something load-bearing [<a href="#ref-contextenv2026">16</a>].</p>
+<p>The side effects are the reason Chapter <a href="10-memory-state-and-forgetting.html#ch:memory">10</a> spends a full chapter here. Recurrent compression measurably weakens the influence of recent interactions, which is the reverse of what a long-horizon task needs [<a href="#ref-compressreliab2026">13</a>]. And compaction has been shown to silently remove safety and policy instructions that happened to sit in the summarized region, so an agent that has been running for six hours may no longer be operating under the constraints it started with [<a href="#ref-govdecay2026">18</a>]. Treat compaction as an action that can violate an invariant, and keep constraints somewhere the compactor cannot reach.</p>
+<h2 id="token-budget-aware-reasoning">6.6 Token-Budget-Aware Reasoning</h2>
+<p>Reasoning length is itself a budget, and models left to choose their own tend to allocate it badly: long chains on easy problems, short ones on hard problems.</p>
+<h3 id="dynamic-token-budgets">6.6.1 Dynamic Token Budgets</h3>
+<p>Assign a token allowance from predicted difficulty rather than a global constant [<a href="#ref-tokenbudget2025">9</a>]. Curriculum-aware scheduling improves on this by recognizing that the right budget shifts as a task progresses, and that overthinking and underthinking are distinct failures requiring opposite corrections [<a href="#ref-curriculumbudget2026">17</a>].</p>
+<p>Where a fixed per-query cap is imposed by the deployment, tree-search policies can be aligned to that specific cap rather than run budget-agnostically and truncated, which is what most systems do and which wastes most of the truncated work [<a href="#ref-treebudget2026">22</a>].</p>
+<h3 id="anytime-behavior">6.6.2 Anytime Behavior</h3>
+<p>A related framing asks the agent to have a usable answer at all times and to improve it while budget remains, rather than asking how to fit a budget. Budget-aware anytime reasoning trains for exactly this property, so an interrupt at any point yields the best answer available so far [<a href="#ref-anytime2026">10</a>]. For interactive systems with unpredictable user patience, this is often more valuable than optimality under the nominal budget.</p>
+<h3 id="risk-control-under-a-compute-budget">6.6.3 Risk Control Under a Compute Budget</h3>
+<p>The cleanest recent formulation places a statistical guarantee on the stopping rule. <em>Conformal</em> methods calibrate a predictor against a held-out sample so that its outputs carry a stated error rate, without assuming anything about the underlying distribution. Applied to stopping, they decide when to stop reasoning so that the risk of an incorrect answer stays below a chosen level, giving a coverage guarantee in place of a tuned heuristic [<a href="#ref-conformalthinking2026">14</a>]. This is where the present chapter meets Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a>: stopping is an abstention decision, and it deserves a derived threshold.</p>
+<h3 id="complexity-based-routing">6.6.4 Complexity-Based Routing</h3>
+<p>Route by predicted difficulty, sending easy queries to small models and reserving frontier capacity for the hard tail. Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a> develops this properly, including the recent shift toward routing at each <em>step</em> rather than once per query, and the calibration problem that determines whether any of it works.</p>
+<p>One refinement is specific to agents. Length-based budgets misprice agentic work, because a step that emits fifty tokens and waits nine seconds on a tool call is cheap in tokens and expensive in time. Budgets defined over elapsed time rather than generated tokens track the real constraint more closely for tool-heavy agents [<a href="#ref-timelymachine2026">21</a>].</p>
+<h2 id="worked-example-a-budget-aware-research-agent">6.7 Worked Example: A Budget-Aware Research Agent</h2>
+<p>An analyst asks: “Which of our top-20 accounts increased spend by more than 30% year over year, and what drove it?” The agent has a $1.00 budget and tools for account lookup, spend history, ticket search, and note retrieval.</p>
+<p><em>Budget-blind execution.</em> The agent does what looks locally sensible at each step.</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Step</th>
+<th style="text-align: left;">Action</th>
+<th style="text-align: right;">Cost</th>
+<th style="text-align: right;">Remaining</th>
+<th style="text-align: left;">Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">1</td>
+<td style="text-align: left;">Retrieve all 20 account records</td>
+<td style="text-align: right;">0.14</td>
+<td style="text-align: right;">0.86</td>
+<td style="text-align: left;">Reasonable</td>
+</tr>
+<tr>
+<td style="text-align: right;">2</td>
+<td style="text-align: left;">Full spend history, all 20</td>
+<td style="text-align: right;">0.31</td>
+<td style="text-align: right;">0.55</td>
+<td style="text-align: left;">Needed 20, used 20</td>
+</tr>
+<tr>
+<td style="text-align: right;">3</td>
+<td style="text-align: left;">Ticket search, all 20 accounts</td>
+<td style="text-align: right;">0.28</td>
+<td style="text-align: right;">0.27</td>
+<td style="text-align: left;">Only 6 qualified</td>
+</tr>
+<tr>
+<td style="text-align: right;">4</td>
+<td style="text-align: left;">Retrieve notes for 6 accounts</td>
+<td style="text-align: right;">0.19</td>
+<td style="text-align: right;">0.08</td>
+<td style="text-align: left;"></td>
+</tr>
+<tr>
+<td style="text-align: right;">5</td>
+<td style="text-align: left;">Synthesis</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: right;">0.08</td>
+<td style="text-align: left;"><strong>Insufficient</strong></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The agent spends $0.92 gathering evidence and cannot afford the step that turns evidence into an answer. It returns a truncated list with no explanation of the drivers. That is a failure, reached after doing almost all the work correctly. Step 3 searched tickets for all twenty accounts when only six had crossed the 30% threshold, information the agent already possessed at step 2.</p>
+<p><em>Budget-aware execution.</em> Same tools, same model, with a reservation and an affordable-action filter. The agent estimates the mandatory finish at $0.18 (synthesis plus verification) and reserves it up front.</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Step</th>
+<th style="text-align: left;">Action</th>
+<th style="text-align: right;">Cost</th>
+<th style="text-align: right;">Slack</th>
+<th style="text-align: left;">Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">1</td>
+<td style="text-align: left;">Retrieve 20 account records</td>
+<td style="text-align: right;">0.14</td>
+<td style="text-align: right;">0.68</td>
+<td style="text-align: left;"><span class="math inline">\(B{-}R = 0.82\)</span></td>
+</tr>
+<tr>
+<td style="text-align: right;">2</td>
+<td style="text-align: left;">Spend history, all 20</td>
+<td style="text-align: right;">0.31</td>
+<td style="text-align: right;">0.37</td>
+<td style="text-align: left;">Required for filter</td>
+</tr>
+<tr>
+<td style="text-align: right;">3</td>
+<td style="text-align: left;">Filter to qualifying accounts</td>
+<td style="text-align: right;">0.00</td>
+<td style="text-align: right;">0.37</td>
+<td style="text-align: left;">6 of 20 remain</td>
+</tr>
+<tr>
+<td style="text-align: right;">4</td>
+<td style="text-align: left;">Ticket search, 6 accounts only</td>
+<td style="text-align: right;">0.09</td>
+<td style="text-align: right;">0.28</td>
+<td style="text-align: left;">Scoped by step 3</td>
+</tr>
+<tr>
+<td style="text-align: right;">5</td>
+<td style="text-align: left;">Notes for 6 accounts</td>
+<td style="text-align: right;">0.19</td>
+<td style="text-align: right;">0.09</td>
+<td style="text-align: left;"></td>
+</tr>
+<tr>
+<td style="text-align: right;">6</td>
+<td style="text-align: left;">Synthesis</td>
+<td style="text-align: right;">0.13</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: left;">Funded from <span class="math inline">\(R\)</span></td>
+</tr>
+<tr>
+<td style="text-align: right;">7</td>
+<td style="text-align: left;">Verification of the six claims</td>
+<td style="text-align: right;">0.05</td>
+<td style="text-align: right;">—</td>
+<td style="text-align: left;">Funded from <span class="math inline">\(R\)</span></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The total is $0.91, and the task completes with a verified answer.</p>
+<p>The two runs spend almost the same money. The difference is where. Reserving $0.18 forced step 4 to be scoped to the six accounts that mattered, which cost $0.09 instead of $0.28, and that single saving funded the entire finish. The reservation did more than protect the last step: it changed an earlier decision, and that is the mechanism by which budget awareness improves completion rather than only reducing spend.</p>
+<h2 id="summary">6.8 Summary</h2>
+<p>Budget awareness turns cost from an outcome into a control signal.</p>
+<p>The mechanism is small and specific. Condition the policy on <span class="math inline">\(B_t\)</span>. Estimate the remaining cost <span class="math inline">\(\hat{R}_t\)</span> and reserve a percentile of it rather than its mean. Filter the action set to what is affordable <em>before</em> prompting, since post-hoc rejection pays twice. Normalize thresholds against <span class="math inline">\(B/M\)</span> so that they mean the same thing across tasks of different sizes. Stop deliberately, on stated criteria, and preferably with a risk guarantee attached [<a href="#ref-conformalthinking2026">14</a>].</p>
+<p>Horizon estimation is the hard part, because a reservation is only as good as the estimate behind it. Combine task-type priors, progress signals, and model estimates; update against similar historical trajectories as execution proceeds; and keep percentiles rather than point estimates, since the purpose is to survive the bad tail.</p>
+<p>In multi-agent systems, allocation and topology are budget decisions, and communication overhead is the cost that single-agent intuition does not see.</p>
+<p>The result to remember is the one the chapter opened with: extra budget helps only agents that can see it. Everything above is machinery for making the budget visible at the moment a decision is made.</p>
+<h2 id="common-misunderstandings">6.9 Common Misunderstandings</h2>
+<p><em>A budget is a limit to check at the end.</em> A limit discovered on contact is an outage. The budget has to be in the state the policy conditions on, and in the filter applied before generation.</p>
+<p><em>More budget produces better results.</em> It does so only for agents that can see it. For budget-blind agents, an additional allowance mostly funds additional unproductive exploration [<a href="#ref-bats2025">3</a>, <a href="#ref-budgettooluse2026">11</a>].</p>
+<p><em>Reserve the mean of the remaining cost.</em> Reserving the mean fails roughly half the time. Reserve a percentile, and choose it from the cost of running out rather than from taste.</p>
+<p><em>Static thresholds transfer across tasks.</em> “Below 15% is critical” means nothing without knowing what remains. Normalize against the estimated remaining cost, <span class="math inline">\(B/M\)</span>, so that the thresholds mean the same thing on a three-step lookup and a thirty-step investigation.</p>
+<p><em>Allocate uniformly across agents.</em> Roles differ by an order of magnitude in cost. Uniform allocation starves the expensive role and leaves the cheap one holding budget it cannot use.</p>
+<p><em>Filtering after generation is equivalent.</em> The proposal has already been paid for, and the model will propose it again.</p>
+<p><em>Compaction is free.</em> It weakens recency [<a href="#ref-compressreliab2026">13</a>] and can delete the constraints being relied on [<a href="#ref-govdecay2026">18</a>]. It is an action with failure modes rather than a maintenance task.</p>
+<p><em>Coordination is cheap.</em> In multi-agent systems the messages are the bill. Count them before adding the fourth agent [<a href="#ref-cohesion2026">12</a>].</p>
+<h2 class="unnumbered" id="exercises">Exercises</h2>
+<ol>
+<li><p>An agent’s remaining cost is log-normal with median $0.40 and p75 $0.62. It holds $0.75. Compute the available budget under mean-reservation and under p75-reservation. Estimate how often each policy fails to complete, and state the assumption your estimate requires.</p></li>
+<li><p>In the worked example, the budget-aware run saved $0.19 at step 4 by scoping to six accounts. Identify the earliest step at which a budget-blind agent had enough information to make the same scoping decision, and explain why it did not.</p></li>
+<li><p>Derive the break-even point at which dynamic budget reallocation across <span class="math inline">\(k\)</span> agents beats static uniform allocation. Express it in terms of the variance of per-agent cost, and state the coordination overhead at which the advantage disappears.</p></li>
+<li><p>An agent’s stopping rule fires when three consecutive steps change the answer by less than <span class="math inline">\(\delta\)</span>. Construct a task on which this rule stops far too early, and propose a modification. Compare your modification to the conformal approach of [<a href="#ref-conformalthinking2026">14</a>].</p></li>
+<li><p>Your context compaction runs every 20 turns and summarizes everything older than the last 5. Write down two invariants this could violate, referring to [<a href="#ref-govdecay2026">18</a>], and design a test that would catch each one.</p></li>
+<li><p>A tool-heavy agent generates 60 tokens per step but waits 8 seconds per tool call. Compare a token budget against a time budget for this workload [<a href="#ref-timelymachine2026">21</a>]. Which failures does each one fail to prevent?</p></li>
+<li><p><strong>Budget state calibration.</strong> A task type has a historical cost distribution with mean $0.45, standard deviation $0.15, P75 $0.55, and P95 $0.72. Given a budget of $0.60, (a) calculate the budget state using the median-based ratio, (b) calculate it using the P75-based ratio, and (c) recommend thresholds for this task type.</p></li>
+<li><p><strong>Horizon estimation.</strong> An agent has completed 4 steps spending $0.18. Historical data shows that tasks with similar spending at step 4 had total costs of $0.32, $0.38, $0.45, $0.41, $0.35, and $0.52. Calculate (a) the updated median remaining cost, (b) the P75 remaining cost, and (c) the recommended reservation for a budget of $0.50.</p></li>
+</ol>
+<h2 class="unnumbered" id="bibliographic-notes">Bibliographic Notes</h2>
+<p>The Budget Tracker and BATS framework are introduced in [<a href="#ref-bats2025">3</a>]. AgentBalance [<a href="#ref-agentbalance2025">1</a>] and related work extend budget awareness to multi-agent systems. Context management techniques include SLIM [<a href="#ref-slim2025">8</a>], AgentPrune [<a href="#ref-agentprune2025">2</a>], and observation masking [<a href="#ref-observationmasking2025">7</a>]. Token-budget-aware reasoning is explored in [<a href="#ref-tokenbudget2025">9</a>].</p>
+<h2 class="unnumbered" id="bibliography">Bibliography</h2>
+<ol>
+<li><div id="ref-agentbalance2025">
+
+</div>
+<p>Y. Cai et al. AgentBalance: Backbone-then-Topology Design for Cost-Effective Multi-Agent Systems under Budget Constraints. <span><em>arXiv:2512.11426</em></span>, 2025.</p></li>
+<li><div id="ref-agentprune2025">
+
+</div>
+<p>Guibin Zhang, Yanwei Yue, Zhixun Li et al. Cut the Crap: An Economical Communication Pipeline for LLM-based Multi-Agent Systems. <span><em>arXiv:2410.02506</em></span>, 2024.</p></li>
+<li><div id="ref-bats2025">
+
+</div>
+<p>T. Liu et al. Budget-Aware Tool-Use Enables Effective Agent Scaling. <span><em>arXiv:2511.17006</em></span>, November 2025.</p></li>
+<li><div id="ref-costcontrol2025">
+
+</div>
+<p>Controlling Performance and Budget of a Centralized Multi-agent LLM System with Reinforcement Learning. <span><em>arXiv:2511.02755</em></span>, 2025.</p></li>
+<li><div id="ref-efficientagents2025">
+
+</div>
+<p>Efficient Agents: Building Effective Agents While Reducing Cost. <span><em>arXiv:2508.02694</em></span>, July 2025.</p></li>
+<li><div id="ref-malbo2025">
+
+</div>
+<p>A. Sabbatella et al. MALBO: Optimizing LLM-Based Multi-Agent Teams via Multi-Objective Bayesian Optimization. <span><em>arXiv:2511.11788</em></span>, 2025.</p></li>
+<li><div id="ref-observationmasking2025">
+
+</div>
+<p>T. Schäfer et al. The Complexity Trap: Simple Observation Masking Is as Efficient as LLM Summarization for Agent Context Management. <span><em>arXiv:2508.21433</em></span>, 2025.</p></li>
+<li><div id="ref-slim2025">
+
+</div>
+<p>Howard Yen, Yoonsang Lee, Ashwin Paranjape et al. Lost in the Maze: Overcoming Context Limitations in Long-Horizon Agentic Search. <span><em>arXiv:2510.18939</em></span>, 2025.</p></li>
+<li><div id="ref-tokenbudget2025">
+
+</div>
+<p>T. Han et al. Token-Budget-Aware LLM Reasoning. <span><em>Findings of ACL</em></span>, July 2025.</p></li>
+<li><div id="ref-anytime2026">
+
+</div>
+<p>Xuanming Zhang et al. “Budget-Aware Anytime Reasoning with LLM-Synthesized Preference Data.” arXiv:2601.11038, 2026. ACL 2026.</p></li>
+<li><div id="ref-budgettooluse2026">
+
+</div>
+<p>Tengxiao Liu et al. “Budget-Aware Tool Use Enables Effective Agent Scaling.” arXiv:2511.17006, 2025. COLM 2026.</p></li>
+<li><div id="ref-cohesion2026">
+
+</div>
+<p>Xu Yang et al. “When Parallelism Pays Off: Cohesion-Aware Task Partitioning for Multi-Agent Coding.” arXiv:2606.00953, 2026.</p></li>
+<li><div id="ref-compressreliab2026">
+
+</div>
+<p>Guanghui Min et al. “Toward Reliable Context Compression for Long-Horizon Agents: An Empirical Study of Execution Instability.” arXiv:2608.06503, 2026.</p></li>
+<li><div id="ref-conformalthinking2026">
+
+</div>
+<p>Xi Wang et al. “Conformal Thinking: Risk Control for Reasoning on a Compute Budget.” arXiv:2602.03814, 2026. ICMl 2026.</p></li>
+<li><div id="ref-contextbudget2026">
+
+</div>
+<p>Yong Wu et al. “ContextBudget: Budget-Aware Context Management for Long-Horizon Search Agents.” arXiv:2604.01664, 2026.</p></li>
+<li><div id="ref-contextenv2026">
+
+</div>
+<p>Yin Lin et al. “Context as an Environment: Programmatic Context Management for Long-Horizon Agents.” arXiv:2608.21690, 2026.</p></li>
+<li><div id="ref-curriculumbudget2026">
+
+</div>
+<p>Amirul Rahman et al. “Avoiding Overthinking and Underthinking: Curriculum-Aware Budget Scheduling for LLMs.” arXiv:2604.19780, 2026.</p></li>
+<li><div id="ref-govdecay2026">
+
+</div>
+<p>Shiyang Chen. “Governance Decay: How Context Compaction Silently Erases Safety Constraints in Long-Horizon LLM Agents.” arXiv:2606.22528, 2026.</p></li>
+<li><div id="ref-progrouter2026">
+
+</div>
+<p>Songyuan Li et al. “ProgRouter: Online Progress-Guided Orchestration for Multi-Agent LLM Workflows under Quality-Cost Tradeoffs.” arXiv:2608.25992, 2026. EMNLP 2026.</p></li>
+<li><div id="ref-scmas2026">
+
+</div>
+<p>Di Zhao et al. “SC-MAS: Constructing Cost-Efficient Multi-Agent Systems with Edge-Level Heterogeneous Collaboration.” arXiv:2601.09434, 2026.</p></li>
+<li><div id="ref-timelymachine2026">
+
+</div>
+<p>Yichuan Ma et al. “Timely Machine: Awareness of Time Makes Test-Time Scaling Agentic.” arXiv:2601.16486, 2026.</p></li>
+<li><div id="ref-treebudget2026">
+
+</div>
+<p>Sora Miyamoto et al. “Aligning Tree-Search Policies with Fixed Token Budgets in Test-Time Scaling of LLMs.” arXiv:2602.09574, 2026. ICML 2026.</p></li>
+</ol>
+
+<div id="bottom"><a href="05-cost-models-and-critical-paths.html" rel="prev">&laquo; Cost Models and Critical Paths</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="07-action-selection-under-budgets.html" rel="next">Action Selection Under Budgets &raquo;</a><br>&copy; 2026 Madhava Gaikwad. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
+</div>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</body>
+</html>

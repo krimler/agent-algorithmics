@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 8: Speculation, Parallelism, and Commit Protocols — Agent Algorithmics</title>
+<meta name="description" content="Watch an agent work and most of what you see is waiting.">
+<meta name="author" content="Madhava Gaikwad">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="book">
+<meta property="og:title" content="Chapter 8: Speculation, Parallelism, and Commit Protocols — Agent Algorithmics">
+<meta property="og:description" content="Watch an agent work and most of what you see is waiting.">
+<meta property="og:url" content="https://krimler.github.io/agent-algorithmics/08-speculation-parallelism-and-commit-protocols.html">
+<link rel="canonical" href="https://krimler.github.io/agent-algorithmics/08-speculation-parallelism-and-commit-protocols.html">
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Speculation, Parallelism, and Commit Protocols", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 8, "url": "https://krimler.github.io/agent-algorithmics/08-speculation-parallelism-and-commit-protocols.html"}</script>
+
+</head>
+<body>
+<div id="page">
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="07-action-selection-under-budgets.html" rel="prev">&laquo; Action Selection Under Budgets</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="09-risk-aware-gates-verification-abstention-refusal.html" rel="next">Risk-Aware Gates: Verification, Abstention, Refusal &raquo;</a></div>
+<h1 id="ch:speculation"><span class="part">Part II: Control and Commitment</span>Chapter 8. Speculation, Parallelism, and Commit Protocols</h1><p>Watch an agent work and most of what you see is waiting.</p>
+<p>The default loop runs observe, decide, act, observe, decide. It is safe, because every decision is made with the latest evidence. It is also almost entirely idle. Ten steps at five seconds each is fifty seconds, and for most of that time the model is blocked on a tool that has no idea anyone is waiting. Users leave and service-level agreements break. The work was never the bottleneck; the ordering was.</p>
+<p>This chapter develops three techniques for breaking the sequential bottleneck. <em>Speculation</em> executes an action before it is known whether the result will be needed. <em>Parallelism</em> executes several actions that are known to be needed at the same time. <em>Commit protocols</em> decide when speculative or parallel results become permanent.</p>
+<p>All three trade safety for speed, and managing that trade is the whole job. The organizing idea is a separation: <em>execution</em> can be fast, speculative, and reversible, while <em>commitment</em> stays conservative, validated, and policy-aware. With the separation in place, the first half can be aggressive because the second half is careful. Without it, and the past year has shown several ways to lose it that nobody anticipated, one has built a system that is fast, confident, and occasionally acting on work it believes it discarded.</p>
+<p>The treatment draws heavily on systems research. Speculative execution powers modern processors [<a href="#ref-hennessy2017computer">6</a>], databases [<a href="#ref-gray1992transaction">5</a>], and distributed systems [<a href="#ref-nightingale2006speculative">13</a>]. Commit protocols coordinate distributed transactions [<a href="#ref-garciamolina1987sagas">3</a>, <a href="#ref-mohan1986transaction">15</a>]. We adapt these ideas to the agent setting, where the “transactions” are tool calls, model invocations, and state modifications. Many agent actions are <em>logically</em> transactional even when the underlying tools are not: they read shared state, compute a plan, and then attempt to apply changes.</p>
+<h2 id="the-case-for-speculation">8.1 The Case for Speculation</h2>
+<p>Sequential execution is safe because each step sees the results of all previous steps. The safety has a cost: latency accumulates additively, and when every step waits for the previous one, the slowest component dominates the user’s experience.</p>
+<p>A useful mental model is a dependency chain. Each step is a node and each “wait for the previous result” is an edge. A purely sequential agent is a path. To reduce latency one must either remove edges (speculation) or execute independent nodes at the same time (parallelism).</p>
+<h3 id="sequential-latency-accumulation">8.1.1 Sequential Latency Accumulation</h3>
+<p>Consider an agent that parses a query, generates search terms, executes the search, retrieves documents, and synthesizes an answer, each step depending on the previous one.</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: center;">Step</th>
+<th style="text-align: left;">Operation</th>
+<th style="text-align: right;">Latency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center;">1</td>
+<td style="text-align: left;">Parse query</td>
+<td style="text-align: right;">2s</td>
+</tr>
+<tr>
+<td style="text-align: center;">2</td>
+<td style="text-align: left;">Generate search terms</td>
+<td style="text-align: right;">3s</td>
+</tr>
+<tr>
+<td style="text-align: center;">3</td>
+<td style="text-align: left;">Execute search</td>
+<td style="text-align: right;">1.5s</td>
+</tr>
+<tr>
+<td style="text-align: center;">4</td>
+<td style="text-align: left;">Retrieve documents</td>
+<td style="text-align: right;">2s</td>
+</tr>
+<tr>
+<td style="text-align: center;">5</td>
+<td style="text-align: left;">Synthesize answer</td>
+<td style="text-align: right;">8s</td>
+</tr>
+<tr>
+<td style="text-align: center;"></td>
+<td style="text-align: left;">Total</td>
+<td style="text-align: right;">16.5s</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The total is the sum of the individual latencies. Two observations matter in practice. The chain is often longer than it looks: “retrieve documents” may include retries, pagination, filtering, and reranking, and “synthesize answer” may include self-checks, citation extraction, and formatting. And variance hurts more than means: if synthesis sometimes takes 8 seconds and sometimes 20, the tail dominates perceived responsiveness, which is the reason system design targets the 99th percentile rather than the average.</p>
+<h3 id="the-speculation-opportunity">8.1.2 The Speculation Opportunity</h3>
+<p>Speculation breaks a sequential dependency by executing an action before its inputs are fully determined. Instead of waiting for certainty, the agent makes an informed guess, starts work early, and later decides whether that work was useful. If the search terms can be predicted with 80% accuracy before parsing completes, steps 1 through 3 can overlap, as Figure <a href="#fig:speculation-gantt">8.1</a> shows.</p>
+<figure id="fig:speculation-gantt">
+<img src="figures/08-speculation-parallelism-and-commit-protocols-fig1-313e0e4dce.png" />
+<figcaption><strong>Figure 8.1.</strong> Speculating on the search terms. The dashed boxes run before the parse has finished; once the parse completes, the guess is validated and, if correct, the search result is already available. A wrong guess costs the sequential time plus the wasted speculative work.</figcaption>
+</figure>
+<p>Speculation saves 4 seconds (24%) when the prediction is correct. When it is wrong, the speculative work is discarded and execution falls back to the sequential path, paying the original 16.5 seconds plus the wasted speculative cost. This suggests a design rule: <em>speculate where the fork is early and the work is cheap</em>. If which path was right becomes known only after a long delay, speculation buys little; if wrong speculation is expensive or irreversible, it is dangerous. In agent workflows the best targets are read-only tool calls (search, retrieval, metadata fetch), lightweight draft generation (outlines, candidate queries), and cacheable computations (embeddings, normalization, parsing).</p>
+<h3 id="speculation-in-llm-inference">8.1.3 Speculation in LLM Inference</h3>
+<p>The same principle operates inside inference. Autoregressive generation is sequential: each token requires a full forward pass conditioned on all previous tokens. <em>Speculative decoding</em> [<a href="#ref-leviathan2023fast">9</a>, <a href="#ref-chen2023accelerating">2</a>] breaks this bottleneck by using a small draft model to propose several tokens, which the target model then verifies in parallel.</p>
+<p>The EAGLE family [<a href="#ref-li2024eagle">10</a>, <a href="#ref-li2024eagle2">11</a>, <a href="#ref-li2025eagle3">12</a>] achieves <span class="math inline">\(3\)</span>–<span class="math inline">\(6\times\)</span> speedups over plain autoregressive decoding. EAGLE-3 maintains acceptance rates of 70–80% across token positions through training-time testing, which simulates the inference process during training so that the draft head learns to recover from its own prediction errors.</p>
+<p>The analogy to CPU branch prediction is direct. Prediction is valuable only when accurate, and mispredictions create wasted work: in a CPU the penalty is a pipeline flush, and in speculative decoding it is rejected tokens and wasted verification. The draft phase places bets on the next few tokens cheaply; the verify phase cashes in the accepted tokens with the expensive model and discards the rest. A rough speed model is <span class="math display">\[\text{Speedup} \approx \frac{\tau}{1 + c_{\text{draft}}/c_{\text{verify}}},\]</span> where <span class="math inline">\(\tau\)</span> is the average number of accepted tokens per verification cycle and <span class="math inline">\(c_{\text{draft}}/c_{\text{verify}}\)</span> is the relative cost of drafting. The shape is what matters: higher acceptance increases the benefit almost linearly, more expensive drafting reduces it, and verification cost dominates when the target model is large.</p>
+<h2 id="parallel-execution">8.2 Parallel Execution</h2>
+<p>Speculation executes actions before knowing whether they are needed; parallelism executes several actions simultaneously when all are known to be needed. The distinction matters because parallelism done correctly discards no work, whereas speculation by definition may. A typical pipeline uses parallelism for independent retrievals and speculation for uncertain next steps.</p>
+<h3 id="independent-tool-calls">8.2.1 Independent Tool Calls</h3>
+<p>Many agent workflows contain independent operations that can run concurrently: several searches, fetches from several sources, or several structured tool calls that gather features before a decision. LLMCompiler [<a href="#ref-kim2024llmcompiler">8</a>] formalizes this with a Function Calling Planner that identifies parallelizable tasks, a Task Fetching Unit that dispatches them, and an Executor that runs them concurrently.</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Benchmark</th>
+<th style="text-align: right;">Latency speedup</th>
+<th style="text-align: right;">Cost savings</th>
+<th style="text-align: right;">Accuracy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">HotpotQA</td>
+<td style="text-align: right;">3.7<span class="math inline">\(\times\)</span></td>
+<td style="text-align: right;">6.7<span class="math inline">\(\times\)</span></td>
+<td style="text-align: right;">+9%</td>
+</tr>
+<tr>
+<td style="text-align: left;">Movie Recommendation</td>
+<td style="text-align: right;">2.8<span class="math inline">\(\times\)</span></td>
+<td style="text-align: right;">4.2<span class="math inline">\(\times\)</span></td>
+<td style="text-align: right;">+6%</td>
+</tr>
+<tr>
+<td style="text-align: left;">ParallelQA</td>
+<td style="text-align: right;">3.4<span class="math inline">\(\times\)</span></td>
+<td style="text-align: right;">5.1<span class="math inline">\(\times\)</span></td>
+<td style="text-align: right;">+7%</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The accuracy improvement deserves comment. Sequential ReAct agents often stop early and decide on incomplete information; parallel execution completes all required tool calls before synthesis, which removes that failure mode. Parallelism also changes the failure modes. In place of “we failed because we stopped early” one can get “we failed because one parallel call returned garbage and contaminated the synthesis,” which is why parallel execution wants explicit validation before commit.</p>
+<h3 id="dependency-analysis">8.2.2 Dependency Analysis</h3>
+<p>Not all tool calls are independent. A compiler-style analysis identifies data dependencies, and the scheduling problem is classical: given a dependency graph, execute tasks in topological order, batching all currently ready tasks.</p>
+<figure>
+<img src="figures/08-speculation-parallelism-and-commit-protocols-alg1-035a1f67a1.png" />
+</figure>
+<p>The novelty in agents is that the dependency graph is often implicit in natural language and must be extracted by the planner. An error in the analysis produces either unnecessary serialization (correct and slow) or incorrect parallel execution (fast and wrong). A good planner behaves like a cautious compiler and serializes when uncertain, while over-serialization defeats the purpose; planners do best when tasks are expressed in a structured format with typed tool signatures and explicit inputs and outputs rather than as free-form instructions.</p>
+<h3 id="bounding-parallelism">8.2.3 Bounding Parallelism</h3>
+<p>Unbounded parallelism defeats budget control. If an agent launches 100 parallel API calls, the cost is <span class="math inline">\(100\times\)</span> regardless of whether the results are used. Systems must bound three quantities: the maximum number of concurrent actions, which prevents resource exhaustion; the total parallel cost, which caps aggregate spending; and the parallel depth, which limits cascades of parallel calls that trigger further parallel calls.</p>
+<p>The reservation mechanism of Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a> extends naturally. Reserve budget for all parallel branches before launching any, so that the agent can complete all initiated work. Concretely, before issuing a batch <span class="math inline">\(\{a_1,\dots,a_k\}\)</span>, check feasibility under a conservative cost model, <span class="math display">\[\sum_{i=1}^k \widehat{c}(a_i) \leq B_t - R_t,\]</span> and dispatch only if it holds. This “reserve before launch” rule prevents a common failure in which the parallel calls succeed and the agent cannot afford the synthesis or validation needed to use them.</p>
+<h2 id="speculative-parallelism">8.3 Speculative Parallelism</h2>
+<p>The most powerful and most dangerous pattern combines the two: launch several speculative branches concurrently and commit only the ones that turn out to be useful. In pure parallelism every branch is known to be needed. In speculative parallelism the branches are <em>hypotheses</em> about what the agent will need next; one may be correct, several may be partly correct, or all may be wrong.</p>
+<p>Speculative parallelism replaces serial uncertainty with bounded waiting. Instead of trying options one by one, the agent pays for all of them and learns quickly which direction is productive. The price is that wasted work stops being an edge case and becomes the default.</p>
+<h3 id="multi-path-speculation">8.3.1 Multi-Path Speculation</h3>
+<p>Consider an agent that is unsure whether a query needs a web search, a database lookup, or a computation. A sequential strategy tests the hypotheses in turn and, in the worst case, pays the full latency of two failed attempts before the third succeeds. A speculative-parallel strategy launches all three, waits for the results, validates which path produced admissible evidence, commits that path, and aborts the others. Latency becomes the maximum of the branch latencies rather than their sum; cost becomes the sum of the branch costs regardless of which is committed. This trade, budget for wall-clock time, is the recurring theme of the chapter.</p>
+<p>Two details separate a robust speculative-parallel agent from a reckless one. Validation must be branch-local: each branch carries its own evidence and confidence, and partial results are not mixed across branches until the commit decisions are made. And abort must be cheap: if aborting a branch is expensive because it wrote external state, the branch was never speculative, and calling it speculative is how the mistake gets made.</p>
+<h3 id="tree-structured-speculation">8.3.2 Tree-Structured Speculation</h3>
+<p>EAGLE and related methods speculate over a tree rather than a chain. At each position the draft model proposes several candidate tokens, producing a tree of continuations, and tree attention verifies all candidates in one forward pass. The agent analogue is branching on several plausible next actions when the policy is uncertain, which reduces the chance of getting stuck on the wrong path early and raises the compute and budget footprint.</p>
+<p>A basic hazard in tree speculation is the exponential decay of joint correctness. If each token has acceptance probability <span class="math inline">\(\alpha\)</span>, a chain of <span class="math inline">\(k\)</span> tokens has joint acceptance probability <span class="math inline">\(\alpha^k\)</span>, and the same holds for action branches: a deep speculative plan is fragile because one wrong assumption invalidates everything downstream. Tree structures hedge by exploring several branches at increased verification cost. Which is better depends on the regime. Under low load with strict latency targets, tree speculation reduces wall-clock time; under high load, the overhead of verifying many branches becomes counterproductive, and tree decoding has been observed to help at low request rates and hurt throughput under high concurrency. This is the familiar tension between single-request latency and system capacity.</p>
+<h3 id="suffix-decoding-for-agentic-workloads">8.3.3 Suffix Decoding for Agentic Workloads</h3>
+<p>SuffixDecoding [<a href="#ref-wang2024suffixdecoding">14</a>] exploits a property specific to agentic workloads: repetition. Agents produce similar outputs across iterations, including code edits, self-reflection templates, API calls, and boilerplate wrappers, so the next output sequence is often already present in the prompt or in a previous generation. Building a suffix tree over the prompt and previous outputs allows the system to propose long matching sequences without any neural computation, which changes the economics: model-based speculation has a draft overhead, while suffix-based speculation has near-zero overhead when a match fails, because the proposal is a data-structure lookup rather than a forward pass. On SWE-bench, SuffixDecoding achieves <span class="math inline">\(1.8\)</span>–<span class="math inline">\(4.5\times\)</span> end-to-end speedup, and it is particularly effective for code generation, where syntactic patterns repeat.</p>
+<p>There is a general lesson here about where speculation comes from. Model-based speculation predicts the future with a smaller model. Suffix decoding notices that the future is frequently already written down somewhere in the context and looks it up. Agentic traffic is unusually redundant, since the same tool schema, wrapper, and file header recur, so the lookup succeeds far more often than intuition suggests. Later work sharpens this: exact-suffix matching misses drafts that are present in the pool but not as an exact suffix, which is most visible on tool-calling traffic where requests repeat nearly everything with small variations, and relaxing the match recovers them at no additional model cost [<a href="#ref-oilbird2026">22</a>]. Other variants exploit batch structure across concurrent agent requests [<a href="#ref-agentspec2026">17</a>] and the asymmetry between a long accumulated context and a short generation [<a href="#ref-asymspec2026">18</a>]. Redundancy in the environment is a resource, and systems that notice it obtain speculation nearly for free.</p>
+<h2 id="commitment-as-the-central-problem">8.4 Commitment as the Central Problem</h2>
+<p>Speculation is easy. Commitment is hard. The difficulty lies in deciding when speculative results become permanent rather than in generating them. Speculation is an optimization; commitment is a correctness property. One can always add speculation, and the question is whether the damage can be contained when speculation is wrong.</p>
+<h3 id="what-commitment-is">8.4.1 What Commitment Is</h3>
+<p>Commitment is the point at which speculative results influence external state (databases, files, APIs), persistent memory (the agent’s knowledge base), irreversible actions (emails sent, payments made), or observable outputs (user-visible responses). Before commitment, speculative results are tentative and can be discarded at zero external cost, although the internal computation has been spent. After commitment, errors propagate and reversal may be impossible or expensive.</p>
+<p>For agents the most common accidental commitments are subtle: writing to a shared cache that other components treat as ground truth, storing speculative conclusions in long-term memory and later retrieving them as facts, or leaking speculative output to the user as though it were confirmed. These failures lack the drama of a wrong bank transfer. They are quieter, and they corrupt future behavior.</p>
+<h3 id="the-irreversibility-gradient">8.4.2 The Irreversibility Gradient</h3>
+<p>Actions vary in reversibility:</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Action type</th>
+<th style="text-align: left;">Reversibility</th>
+<th style="text-align: left;">Recovery cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Read-only query</td>
+<td style="text-align: left;">Fully reversible</td>
+<td style="text-align: left;">Zero</td>
+</tr>
+<tr>
+<td style="text-align: left;">Local computation</td>
+<td style="text-align: left;">Fully reversible</td>
+<td style="text-align: left;">Zero</td>
+</tr>
+<tr>
+<td style="text-align: left;">Memory update</td>
+<td style="text-align: left;">Reversible with overhead</td>
+<td style="text-align: left;">Low</td>
+</tr>
+<tr>
+<td style="text-align: left;">Draft message</td>
+<td style="text-align: left;">Reversible before send</td>
+<td style="text-align: left;">Low</td>
+</tr>
+<tr>
+<td style="text-align: left;">Sent message</td>
+<td style="text-align: left;">Difficult to reverse</td>
+<td style="text-align: left;">Medium</td>
+</tr>
+<tr>
+<td style="text-align: left;">Financial transaction</td>
+<td style="text-align: left;">May require refund</td>
+<td style="text-align: left;">High</td>
+</tr>
+<tr>
+<td style="text-align: left;">Deleted data</td>
+<td style="text-align: left;">May be unrecoverable</td>
+<td style="text-align: left;">Very high</td>
+</tr>
+<tr>
+<td style="text-align: left;">Physical action</td>
+<td style="text-align: left;">Often irreversible</td>
+<td style="text-align: left;">Extreme</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Commit protocols must be calibrated to irreversibility. Read-only speculation needs minimal control; irreversible actions need maximum scrutiny. If every action required heavyweight coordination, the agent would become slow again, so good designs stratify: lightweight commit for reversible internal actions, gated commit for persistent memory, transactional commit for external writes, and human or policy escalation for irreversible steps.</p>
+<h3 id="stratus-undo-and-retry-for-cloud-agents">8.4.3 STRATUS: Undo-and-Retry for Cloud Agents</h3>
+<p>STRATUS [<a href="#ref-jha2025stratus">7</a>] demonstrates that transactional guarantees are achievable for agent systems. It introduces transactional no-regression (TNR): only reversible changes that will not break existing functionality may be made. The point is that rollback is <em>defined</em> and <em>practical</em>, rather than that every step is perfectly reversible. The mechanisms are write locks that prevent conflicting concurrent commands, command simulation that catches errors before execution, an undo operator for each action, and bounded transaction size to keep rollbacks tractable.</p>
+<p>On the AIOpsLab and ITBench cloud-engineering benchmarks, STRATUS outperformed prior systems by at least 150%, attributed primarily to undo-and-retry: when the mitigation agent makes an unsuccessful move, it reverts to the last checkpoint and explores alternatives. The pattern is familiar from systems generally. If undo is cheap, exploration can be aggressive, because undo turns a catastrophic mistake into wasted work. That is exactly what speculation needs, and without undo, speculation tends to be conservative because the downside is too large.</p>
+<h3 id="making-rollback-cheap-enough-to-matter">8.4.4 Making Rollback Cheap Enough to Matter</h3>
+<p>STRATUS establishes that undo is achievable. The follow-on question is how much it costs, because a rollback that takes thirty seconds to restore a sandbox will be reserved for disasters rather than used speculatively.</p>
+<p>Two systems have pushed sandbox checkpoint and restore into the millisecond range. DeltaBox achieves millisecond-level checkpoint and rollback of complete sandbox state, including the filesystem, process memory, and open descriptors [<a href="#ref-deltabox2026">21</a>]. Crab takes a semantics-aware approach, capturing only the parts of a container’s state that need capturing [<a href="#ref-crab2026">20</a>]. For computer-use agents operating in live desktop environments, TClone forks the running GUI environment itself, so an agent can try an action on a copy of the user’s actual workspace [<a href="#ref-tclone2026">24</a>].</p>
+<p>The economics shift once undo is this cheap. Speculation is worth it when <span class="math display">\[p_{\text{useful}} \cdot \text{saving} &gt; (1 - p_{\text{useful}}) \cdot (c_{\text{waste}} + c_{\text{rollback}}),\]</span> and driving <span class="math inline">\(c_{\text{rollback}}\)</span> toward zero moves the break-even <span class="math inline">\(p_{\text{useful}}\)</span> down sharply. Speculation that was uneconomical at a one-second rollback becomes routine at one millisecond. This is the progression that made speculative execution ubiquitous in processors, arriving about forty years later.</p>
+<h3 id="when-abort-does-not-abort">8.4.5 When Abort Does Not Abort</h3>
+<p>Everything above assumes that discarding speculative work actually discards it. That assumption has recently been shown to be false in a way that should change how these systems are built.</p>
+<p>A stateful agent abandons a reasoning branch by removing it from the transcript, and the application is satisfied that the branch is gone. The serving session, however, retains key/value cache state across that logical abort, and the model can continue to attend to the abandoned tokens, so a branch the application believes it discarded goes on influencing subsequent generation [<a href="#ref-abortedkv2026">16</a>]. The application-level and serving-level notions of “this did not happen” have come apart, and nothing in the API surface reveals it.</p>
+<p>Consider what this breaks. A gate rejects a proposed action as unsafe. The agent regenerates. The regeneration is conditioned, invisibly, on the rejected reasoning. The audit trail shows a clean rejection followed by a fresh proposal, and the trace is wrong.</p>
+<p><em>Property (Complete abort).</em> Aborting speculative work at step <span class="math inline">\(t\)</span> must restore the system to a state indistinguishable, to all subsequent computation, from one in which the speculative work never executed. This includes external state, agent memory, and serving-layer state such as the KV cache.</p>
+<p>Achieving it means clearing or invalidating the cache prefix associated with an aborted branch, or running speculative branches in separate sessions so that abandonment is session teardown rather than transcript editing. The second is more expensive and much easier to verify.</p>
+<p>The related lesson of <em>Safe to Resume?</em> is that checkpoint and rollback machinery is itself part of the attack surface. An adversary who can influence what gets checkpointed, or when a resume occurs, can break execution continuity in ways the agent cannot detect [<a href="#ref-saferesume2026">23</a>]. Recovery infrastructure needs the same threat modeling as the actions it protects (Chapter <a href="12-capability-boundaries-and-secure-tool-use.html#ch:capability">12</a>). None of this invalidates speculation. It sharpens the requirement: an abort that is incomplete is no abort, and completeness is a property to engineer and test rather than inherit from a framework.</p>
+<h3 id="retried-calls-are-not-the-same-call">8.4.6 Retried Calls Are Not the Same Call</h3>
+<p>There is a second, independent way for rollback to fail, and it is arguably worse because the standard advice causes it.</p>
+<p>Frameworks that offer checkpoint and restore tell developers to make external tool calls safe to retry. The advice is sound for ordinary programs, where a retried call is byte-identical to the original; servers deduplicate such retries with an <em>idempotency key</em>, a caller-supplied identifier that makes a repeated request return the original result instead of producing a second effect. It fails for agents, because an agent re-synthesizes its request after a restore and produces something subtly different. The server sees a new request rather than a retry, and the idempotency protection never engages [<a href="#ref-acrfence2026">25</a>]. The consequences are concrete: duplicate payments, and re-use of credentials that were already consumed. Two documented attack classes, action replay and authority resurrection, exploit precisely this gap.</p>
+<p><em>Property (Stable retry).</em> For checkpoint and restore to be safe, the request issued after a restore must be identical to the original in every field the server uses for deduplication. An agent that regenerates its request does not satisfy this by default.</p>
+<p>Achieving it requires engineering: capture the exact serialized request at commit time and replay the captured bytes rather than regenerating from the prompt, and bind an idempotency key at the point of first synthesis and carry it through the checkpoint. Neither is difficult, and neither happens automatically.</p>
+<h3 id="recovery-has-a-measurable-law">8.4.7 Recovery Has a Measurable Law</h3>
+<p>Agents often appear to recover from failed tool calls, and until recently that appearance had no formal account. Expected Recovery Regret quantifies how far a recovery policy deviates from the optimal one under stochastic execution noise, and relates it to an empirically observable efficiency score through a first-order law [<a href="#ref-recoverlaw2026">27</a>]. The result is falsifiable and has been validated across several tool-use settings. Its engineering value is prediction: given a measurable quantity from ordinary traces, one can estimate how much recovery capability a configuration has before committing it to a workload where recovery matters.</p>
+<h3 id="self-modification-and-reversibility">8.4.8 Self-Modification and Reversibility</h3>
+<p>Agents increasingly modify their own prompts, tools, and harnesses at runtime. A mutation that improves capability may leave persistent effects that cannot be reversed from states other than the one in which it was created, in which case the usual undo machinery silently does not apply. Verifying recoverability of self-modifications across counterfactual states finds a substantial fraction of capability-improving mutations that fail the check [<a href="#ref-evoundo2026">26</a>]. If a system permits self-modification, the reversibility of each mutation is a property to verify, and the verification has to consider states other than the current one.</p>
+<h2 id="commit-protocols">8.5 Commit Protocols</h2>
+<p>We now formalize protocols for controlling commitment. The goal is to permit early execution while preventing premature permanence. The transaction literature supplies the vocabulary, and the agent setting adds a twist: many actions have no native transactional semantics, so the protocol must be implemented at the orchestration layer.</p>
+<h3 id="two-phase-commit">8.5.1 Two-Phase Commit</h3>
+<p>The simplest safe protocol separates execution from commitment. In the first phase, <em>speculative execution</em>, actions run in isolation with no persistent state modification and no irreversible external effect, and their results are stored in a proposal buffer. In the second phase, <em>commit decision</em>, the proposals are evaluated against policy, budget, and alignment requirements; one proposal (or a bounded set) is committed and the rest are aborted. Speculation provides the latency reduction, and the commit phase ensures correctness.</p>
+<p>In the agent context the proposal buffer is often the missing abstraction. If speculative outputs are written directly into shared state, commitment has already happened. A proposal buffer can be an in-memory structure scoped to the current decision, a write-ahead log of intended changes, or a shadow copy of state that becomes visible only on commit.</p>
+<p>Two-phase commit also clarifies what to do with partial results. A speculative branch that produced useful evidence and was not committed may be kept as a <em>non-authoritative hint</em> for future decisions, and only if the memory system can represent that distinction. If it cannot, the branch should be discarded. Many systems fail here by keeping speculative hints as though they were facts.</p>
+<h3 id="commit-states">8.5.2 Commit States</h3>
+<p>Each speculative action progresses through explicit states, shown in Figure <a href="#fig:commit-states">8.2</a>.</p>
+<figure id="fig:commit-states">
+<img src="figures/08-speculation-parallelism-and-commit-protocols-fig2-213ea232d9.png" />
+<figcaption><strong>Figure 8.2.</strong> The commit state machine. An action executed speculatively is <span class="smallcaps">Proposed</span>; it becomes <span class="smallcaps">Validated</span> when evidence, cost, and policy checks pass, and <span class="smallcaps">Committed</span> only when the gate approves. Any failure sends it to <span class="smallcaps">Aborted</span>, which must be side-effect free.</figcaption>
+</figure>
+<p>The state machine is deliberately plain. It prevents a class of design errors in which validation is implied rather than represented. With the state explicit, logs, debuggers, and tests can assert invariants such as “no external write occurs in <span class="smallcaps">Proposed</span>,” “memory updates require <span class="smallcaps">Validated</span>,” and “aborted proposals are not read by downstream stages.”</p>
+<h3 id="the-saga-pattern-for-long-running-transactions">8.5.3 The Saga Pattern for Long-Running Transactions</h3>
+<p>For complex multi-step workflows, strict two-phase commit is impractical. The saga pattern [<a href="#ref-garciamolina1987sagas">3</a>] decomposes the workflow into a sequence of local transactions <span class="math inline">\(T_1, T_2, \ldots, T_n\)</span>, each with a compensating transaction <span class="math inline">\(C_1, C_2, \ldots, C_n\)</span>. If <span class="math inline">\(T_j\)</span> fails, the compensating transactions run in reverse order, <span class="math inline">\(C_{j-1}, C_{j-2}, \ldots, C_1\)</span>, as Figure <a href="#fig:saga">8.3</a> shows. This provides eventual consistency without distributed locking.</p>
+<figure id="fig:saga">
+<img src="figures/08-speculation-parallelism-and-commit-protocols-fig3-d32f16947f.png" />
+<figcaption><strong>Figure 8.3.</strong> A saga. Each step has a compensating action that undoes its effect. When step 3 fails, steps 2 and 1 are compensated in reverse order, leaving the system consistent without any global lock having been held.</figcaption>
+</figure>
+<p>Sagas are a compromise: atomicity is given up in exchange for feasibility. In agent terms, sagas are what one does when the task is inherently long-running, touches several systems, and cannot hold locks or keep a single transaction open. SagaLLM [<a href="#ref-chang2025sagallm">1</a>] adapts the pattern to agents with three integrated components: context management that persists state projections at each checkpoint, validation by independent agents that check syntactic correctness, semantic coherence, factual accuracy, and constraint adherence, and saga-style execution with automated compensation. The system addresses a basic limitation, that language models struggle with self-validation, by placing the validators outside the model being validated.</p>
+<p>The essential point is that sagas make compensation first-class. If compensation cannot be defined, speculative execution is unsafe. Many real agent actions lack clean inverses: “delete file” has no true compensation unless snapshots exist, “send email” has no compensation and only follow-up, “publish output” has no compensation because the output may have been copied. This is why the irreversibility gradient matters. Sagas are plausible in domains where compensation is meaningful and dangerous where it is not.</p>
+<h2 id="optimistic-concurrency-control">8.6 Optimistic Concurrency Control</h2>
+<p>When several agents or processes may modify shared state, concurrency control becomes unavoidable. <em>Pessimistic concurrency control</em> acquires locks before accessing shared resources; it prevents conflicts by construction and is slow and brittle, since transactions block on locks and one stalled agent can delay many. <em>Optimistic concurrency control</em> (OCC) proceeds without locks, validates at commit time, and retries on conflict; it is fast when conflicts are rare and expensive when they are frequent.</p>
+<p>For most agent workloads OCC is the right default. Agent actions are short-lived, conflicts are uncommon, and retry costs are acceptable. Agents already tolerate retries as part of their reasoning loop, so retrying a transaction fits the execution model.</p>
+<h3 id="occ-for-agent-actions">8.6.1 OCC for Agent Actions</h3>
+<p>The protocol mirrors the database version at the level of agent-visible state. At <em>begin</em>, record a version number or timestamp for each accessed resource. During <em>execute</em>, perform speculative modifications locally without touching shared state. At <em>validate</em>, check that no other transaction has modified any accessed resource since the recorded versions. Then <em>commit or retry</em>: make the changes permanent if validation passes, and otherwise abort and retry from a fresh state.</p>
+<p>The subtlety is what counts as a resource. In an agent system, resources include database rows and also memory entries used for retrieval, cached tool outputs, configuration parameters, and external API responses treated as authoritative. If a speculative action depends on any of these, they must be versioned or otherwise checked for interference. Omitting a dependency from the validation set leads to <em>time-travel bugs</em>: the agent commits a decision based on a state that never existed atomically.</p>
+<h3 id="conflict-resolution">8.6.2 Conflict Resolution</h3>
+<p>When conflicts occur, several strategies are common. Last-write-wins is simple and may silently discard updates. First-write-wins preserves the initial intent and may starve later writers. Merge combines non-conflicting changes when possible. Escalate defers to a higher-level policy or a human. For agent memory, merge is often appropriate: if two agents update different fields of the same record, both updates can be kept, while true conflicts, updates to the same field with incompatible meaning, require escalation or explicit policy. A useful heuristic classifies conflicts by semantic independence: if the updates commute, merge; if they do not, escalate. Guessing silently is worse than stopping, because a silently mismerged state is discovered much later and by someone else.</p>
+<h3 id="concurrency-control-in-practice">8.6.3 Concurrency Control in Practice</h3>
+<p>This has stopped being hypothetical. Multiple coding agents now routinely run in parallel against one git tree, several DevOps agents against one cluster, several document agents against one file. The moment two of them mutate shared state they are in the regime the database community spent decades on, and most agent frameworks entered it without noticing: there is no transaction, no version check, and no validation phase, only two writers and a race.</p>
+<p>CoAgent addresses this directly, providing concurrency control for multi-agent systems operating on shared external state [<a href="#ref-coagent2026">19</a>]. The design point worth retaining is that the validation set must include everything the agent <em>read</em> to justify its action as well as what it wrote. An agent that read a configuration file, reasoned about it for ninety seconds, and then wrote a patch has a dependency on that configuration, and if the validation set omits it the agent commits a decision justified by a state that no longer exists. This is the time-travel bug at multi-agent scale, where it is considerably more likely and considerably harder to reproduce.</p>
+<h2 id="interaction-with-budgets">8.7 Interaction with Budgets</h2>
+<p>Speculation interacts tightly with the budget framework of Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a>, in two ways.</p>
+<h3 id="speculative-budget-accounting">8.7.1 Speculative Budget Accounting</h3>
+<p>Speculative cost must be charged at execution time rather than at commit time. If an agent speculatively executes five parallel branches at $0.10 each, the budget decreases by $0.50 immediately, regardless of how many branches are eventually committed. The rule is conservative and necessary. If speculative cost were charged only at commit, an agent could launch unbounded speculation and discard most of it, and the budget guarantee would be void. Budgets constrain <em>work done</em>, including work that is later discarded. The physical analogy holds: a CPU pays the energy cost of a mispredicted branch even though the result is discarded.</p>
+<h3 id="reservation-for-commit">8.7.2 Reservation for Commit</h3>
+<p>The commit phase consumes resources of its own: validation models, policy checks, logging, and sometimes additional tool calls. An agent that speculates away its entire budget cannot afford to commit. The slack-based rule of Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a> applies directly. Let <span class="math inline">\(C_{\text{min,commit}}\)</span> be the minimum cost of committing any result safely. Admissible speculative spending satisfies <span class="math display">\[b_{\text{speculation}} \leq B - C_{\text{min,commit}} - \epsilon,\]</span> where <span class="math inline">\(\epsilon\)</span> is a safety margin. Many agent failures reduce to violating this rule: the agent does impressive exploratory work and then cannot afford the final synthesis or validation.</p>
+<h2 id="interaction-with-gates">8.8 Interaction with Gates</h2>
+<p>Gates (Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a>) mediate commitment, and the interaction is simple and strict. Speculative actions may execute before gate evaluation, and their results remain tentative. The final commit decision is gated on risk assessment, budget state, alignment constraints, and capability authorization. A speculative action that passes every execution check may still be blocked at commit, and this is intentional: gates enforce policy, and passing a gate is a property of a <em>decision</em>, made in context, rather than a property of an action. Whether an action is allowed can depend on the remaining budget, prior actions, the user’s role, or cumulative risk, and gates therefore belong at commit time.</p>
+<h2 id="worked-example-a-parallel-research-agent">8.9 Worked Example: A Parallel Research Agent</h2>
+<p>Consider an agent that synthesizes information from several sources. The naive sequential approach:</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: center;">Step</th>
+<th style="text-align: left;">Operation</th>
+<th style="text-align: right;">Latency</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: center;">1</td>
+<td style="text-align: left;">Parse query</td>
+<td style="text-align: right;">1s</td>
+</tr>
+<tr>
+<td style="text-align: center;">2</td>
+<td style="text-align: left;">Search source A</td>
+<td style="text-align: right;">3s</td>
+</tr>
+<tr>
+<td style="text-align: center;">3</td>
+<td style="text-align: left;">Search source B</td>
+<td style="text-align: right;">2.5s</td>
+</tr>
+<tr>
+<td style="text-align: center;">4</td>
+<td style="text-align: left;">Search source C</td>
+<td style="text-align: right;">4s</td>
+</tr>
+<tr>
+<td style="text-align: center;">5</td>
+<td style="text-align: left;">Retrieve documents (A)</td>
+<td style="text-align: right;">1.5s</td>
+</tr>
+<tr>
+<td style="text-align: center;">6</td>
+<td style="text-align: left;">Retrieve documents (B)</td>
+<td style="text-align: right;">1s</td>
+</tr>
+<tr>
+<td style="text-align: center;">7</td>
+<td style="text-align: left;">Retrieve documents (C)</td>
+<td style="text-align: right;">2s</td>
+</tr>
+<tr>
+<td style="text-align: center;">8</td>
+<td style="text-align: left;">Synthesize answer</td>
+<td style="text-align: right;">5s</td>
+</tr>
+<tr>
+<td style="text-align: center;"></td>
+<td style="text-align: left;">Total (sequential)</td>
+<td style="text-align: right;">20s</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>With parallel execution of the independent operations, the three searches run together (4 s, the maximum of 3, 2.5, and 4) and the three retrievals run together (2 s), for a total of <span class="math inline">\(1 + 4 + 2 + 5 = 12\)</span> s. Parallelism alone yields a 40% reduction with no wasted work.</p>
+<p>Now add speculation: begin synthesis while the retrievals are in progress, on the assumption that the documents will match the predictions. Retrieval and speculative synthesis overlap (5 s), followed by a validate-and-commit step (0.5 s), for a total of 10.5 s. The commit phase validates that the retrieved documents match the speculative synthesis; if validation fails, the agent discards the draft and reruns synthesis, paying an additional 5 s.</p>
+<p>At $0.01 per search, $0.02 per retrieval, and $0.05 per synthesis, the sequential and parallel runs each cost $0.14, and the speculative-parallel run costs $0.14 when the speculation is correct and $0.19 when it fails. At 80% speculation accuracy the expected cost is $0.15, a 7% increase for a 47.5% latency reduction. Whether the trade is acceptable depends on the product; the framework makes it explicit.</p>
+<h2 id="summary">8.10 Summary</h2>
+<p>Sequential execution provides safety at the cost of latency. Speculation and parallelism trade safety for speed, and safety is recovered through commit protocols that validate speculative results before making them permanent.</p>
+<p>The techniques form a hierarchy. Pure parallelism executes independent, known-needed operations concurrently and wastes nothing. Speculation executes predicted-needed operations early and discards work on misprediction. Speculative parallelism executes several uncertain branches concurrently, achieving maximum speed at the cost of maximum potential waste.</p>
+<p>Commit protocols supply the safety net: two-phase commit for short transactions, sagas for long-running workflows, and optimistic concurrency control for shared state. STRATUS shows that undo-and-retry makes aggressive exploration practical, and millisecond-scale checkpointing changes which speculation is worth doing. Two recent results sharpen the requirements: an abort is complete only when every layer that holds state, including the serving cache, has forgotten the branch, and a retry is safe only when the replayed request is byte-identical to the original.</p>
+<p>For inference, speculative decoding achieves <span class="math inline">\(2\)</span>–<span class="math inline">\(6\times\)</span> speedups, with EAGLE-3 sustaining 70–80% acceptance through training-time testing, and SuffixDecoding exploits the repetition in agentic workloads for near-free speculation. These techniques compose: an agent can use speculative decoding internally while applying transactional commit externally.</p>
+<p>The unifying principle is to separate the decision to execute from the decision to commit. Execute early. Commit carefully.</p>
+<h2 id="common-misunderstandings">8.11 Common Misunderstandings</h2>
+<p><em>Speculation is free.</em> Rejected results still consume compute, memory, API calls, and budget. A ten-branch speculation with 10% acceptance wastes 90% of its speculative cost.</p>
+<p><em>Parallel execution always reduces latency.</em> It helps only when the operations are independent and resources are available. Under contention, parallel execution can increase latency through queueing and context switching.</p>
+<p><em>Speculative results can be committed once they look right.</em> Speculation is an optimization and commitment is a correctness boundary. Every speculative result passes validation before it becomes permanent.</p>
+<p><em>Speculative parallelism can be unbounded.</em> Launching <span class="math inline">\(n\)</span> branches costs <span class="math inline">\(n\times\)</span> regardless of utility. Without bounds, an agent can exhaust its budget before completing useful work.</p>
+<p><em>A higher acceptance rate always means better performance.</em> Acceptance must be weighed against draft cost. A heavy draft model with 95% acceptance can be slower than a light draft with 70%.</p>
+<p><em>Speculation parameters transfer across tasks.</em> Acceptance rates vary by domain. EAGLE-3 performs well on general reasoning and degrades on translation. Speculation depth must be tuned to the task.</p>
+<p><em>Sagas remove the need for careful design.</em> Sagas provide eventual consistency. A poorly designed compensation leaves the system in an inconsistent state that appears recovered.</p>
+<p><em>Removing a branch from the transcript aborts it.</em> It leaves the serving session’s KV state intact, and the model can keep attending to the discarded reasoning [<a href="#ref-abortedkv2026">16</a>]. Verify that abort is complete at every layer that holds state, or run speculative branches in separate sessions.</p>
+<p><em>Rollback machinery is purely defensive.</em> Checkpoint and restore is executable infrastructure with its own attack surface, and it has been shown breakable [<a href="#ref-saferesume2026">23</a>]. Threat-model the recovery path.</p>
+<p><em>Validation covers only what was written.</em> The validation set must include everything the action’s justification depended on, including retrieved memory, cached tool output, and configuration [<a href="#ref-coagent2026">19</a>].</p>
+<p><em>Rollback cost is a constant.</em> It is a design variable. Millisecond checkpoint and restore changes which speculation is worth doing [<a href="#ref-deltabox2026">21</a>, <a href="#ref-crab2026">20</a>], and a system built when rollback was expensive will keep speculating too conservatively long after it stopped being so.</p>
+<h2 class="unnumbered" id="exercises">Exercises</h2>
+<ol>
+<li><p><strong>Speculation break-even.</strong> Speculation costs <span class="math inline">\(c_s\)</span>, saves latency <span class="math inline">\(\ell\)</span> when correct, and incurs recovery cost <span class="math inline">\(c_r\)</span> when wrong. Derive the minimum accuracy <span class="math inline">\(\alpha^*\)</span> at which speculation reduces expected cost. How does <span class="math inline">\(\alpha^*\)</span> behave as <span class="math inline">\(c_r \rightarrow \infty\)</span>?</p></li>
+<li><p><strong>Parallel speedup bound.</strong> Given <span class="math inline">\(n\)</span> independent operations with latencies <span class="math inline">\(\ell_1,\dots,\ell_n\)</span>, prove that parallel execution has latency <span class="math inline">\(\max_i \ell_i\)</span> while sequential execution has latency <span class="math inline">\(\sum_i \ell_i\)</span>. Show that the speedup is maximized when all <span class="math inline">\(\ell_i\)</span> are equal.</p></li>
+<li><p><strong>Saga design.</strong> Design compensating transactions for a workflow that (1) updates user preferences, (2) triggers a notification, and (3) logs the change. What compensation is possible if step (2) fails after (1) has committed?</p></li>
+<li><p><strong>OCC conflict resolution.</strong> Two agents modify the same document concurrently. One adds content; the other deletes content. Both read version <span class="math inline">\(v\)</span>. Propose a merge strategy that preserves both intents without human escalation.</p></li>
+<li><p><strong>Speculative decoding trade-off.</strong> A draft model proposes <span class="math inline">\(k\)</span> tokens with acceptance probability <span class="math inline">\(\alpha\)</span> each. Draft cost is <span class="math inline">\(c_d\)</span> per token and verification cost is <span class="math inline">\(c_v\)</span>; sequential decoding costs <span class="math inline">\(c_v\)</span> per token. Derive the optimal <span class="math inline">\(k\)</span>.</p></li>
+<li><p><strong>Complete abort.</strong> Describe a test that would detect the incomplete-abort failure of [<a href="#ref-abortedkv2026">16</a>] in a running system without access to the serving layer’s internals.</p></li>
+</ol>
+<h2 class="unnumbered" id="bibliographic-notes">Bibliographic Notes</h2>
+<p>Speculative execution in computer architecture is covered by Hennessy and Patterson [<a href="#ref-hennessy2017computer">6</a>]. Its connection to inference was established by Leviathan et al. [<a href="#ref-leviathan2023fast">9</a>] and developed through speculative sampling and the EAGLE series [<a href="#ref-li2024eagle">10</a>, <a href="#ref-li2024eagle2">11</a>, <a href="#ref-li2025eagle3">12</a>]. SuffixDecoding [<a href="#ref-wang2024suffixdecoding">14</a>] shows that non-neural speculation can outperform model-based methods in repetitive domains.</p>
+<p>Parallel function calling in agents was formalized by LLMCompiler [<a href="#ref-kim2024llmcompiler">8</a>], which demonstrated large latency and cost improvements by exploiting task independence.</p>
+<p>Transaction management draws on decades of database research. Gray’s foundational work [<a href="#ref-gray1978notes">4</a>] established the concepts, and the saga pattern [<a href="#ref-garciamolina1987sagas">3</a>] adapted them to long-running workflows. SagaLLM [<a href="#ref-chang2025sagallm">1</a>] brings these ideas to agents, and STRATUS [<a href="#ref-jha2025stratus">7</a>] demonstrates undo-and-retry in cloud remediation.</p>
+<h2 class="unnumbered" id="bibliography">Bibliography</h2>
+<ol>
+<li><div id="ref-chang2025sagallm">
+
+</div>
+<p>E. Y. Chang and L. Geng. SagaLLM: Context Management, Validation, and Transaction Guarantees for Multi-Agent LLM Planning. <span><em>Proceedings of the VLDB Endowment</em></span>, 18(12):4874–4886, 2025.</p></li>
+<li><div id="ref-chen2023accelerating">
+
+</div>
+<p>C. Chen et al. Accelerating Large Language Model Decoding with Speculative Sampling. <span><em>arXiv preprint arXiv:2302.01318</em></span>, 2023.</p></li>
+<li><div id="ref-garciamolina1987sagas">
+
+</div>
+<p>H. Garcia-Molina and K. Salem. Sagas. In <span><em>ACM SIGMOD</em></span>, 1987.</p></li>
+<li><div id="ref-gray1978notes">
+
+</div>
+<p>J. Gray. Notes on Data Base Operating Systems. In <span><em>Operating Systems: An Advanced Course</em></span>. Springer, 1978.</p></li>
+<li><div id="ref-gray1992transaction">
+
+</div>
+<p>J. Gray and A. Reuter. <span><em>Transaction Processing: Concepts and Techniques</em></span>. Morgan Kaufmann, 1992.</p></li>
+<li><div id="ref-hennessy2017computer">
+
+</div>
+<p>J. L. Hennessy and D. A. Patterson. <span><em>Computer Architecture: A Quantitative Approach</em></span>. Morgan Kaufmann, 2017.</p></li>
+<li><div id="ref-jha2025stratus">
+
+</div>
+<p>S. Jha et al. STRATUS: Transactional Multi-Agent Systems for Cloud Incident Remediation. In <span><em>NeurIPS</em></span>, 2025.</p></li>
+<li><div id="ref-kim2024llmcompiler">
+
+</div>
+<p>S. Kim et al. An LLM Compiler for Parallel Function Calling. In <span><em>ICML</em></span>, 2024.</p></li>
+<li><div id="ref-leviathan2023fast">
+
+</div>
+<p>Y. Leviathan et al. Fast Inference from Transformers via Speculative Decoding. In <span><em>ICML</em></span>, 2023.</p></li>
+<li><div id="ref-li2024eagle">
+
+</div>
+<p>Y. Li et al. EAGLE. In <span><em>ICML</em></span>, 2024.</p></li>
+<li><div id="ref-li2024eagle2">
+
+</div>
+<p>Y. Li et al. EAGLE-2. In <span><em>EMNLP</em></span>, 2024.</p></li>
+<li><div id="ref-li2025eagle3">
+
+</div>
+<p>Y. Li et al. EAGLE-3. In <span><em>NeurIPS</em></span>, 2025.</p></li>
+<li><div id="ref-nightingale2006speculative">
+
+</div>
+<p>E. Nightingale et al. Speculative Execution in a Distributed File System. In <span><em>SOSP</em></span>, 2005.</p></li>
+<li><div id="ref-wang2024suffixdecoding">
+
+</div>
+<p>K. Wang et al. SuffixDecoding: Extreme Speculative Decoding for Emerging AI Applications. In <span><em>NeurIPS</em></span>, 2025.</p></li>
+<li><div id="ref-mohan1986transaction">
+
+</div>
+<p>C. Mohan, Bruce Lindsay, and Ron Obermarck. “Transaction Management in the R* Distributed Database Management System.” <em>ACM Transactions on Database Systems</em>, 11(4):378–396, 1986.</p></li>
+<li><div id="ref-abortedkv2026">
+
+</div>
+<p>Guijia Zhang and Harry Yang. “Aborted but Not Forgotten: KV-Cache Retention Breaks Rollback Consistency in Language Agents.” arXiv:2608.15939, 2026.</p></li>
+<li><div id="ref-agentspec2026">
+
+</div>
+<p>Xin Wang et al. “AgentSpec: Speculative Decoding for Batch Inference of LLM Agents.” arXiv:2608.24004, 2026. EMNLP 2026.</p></li>
+<li><div id="ref-asymspec2026">
+
+</div>
+<p>Sheng Liang et al. “AsymSpec: Context-Asymmetric Speculative Decoding for Agentic LLMs.” arXiv:2608.26004, 2026. EMNLP.</p></li>
+<li><div id="ref-coagent2026">
+
+</div>
+<p>Hongtao Lyu et al. “CoAgent: Concurrency Control for Multi-Agent Systems.” arXiv:2606.15376, 2026.</p></li>
+<li><div id="ref-crab2026">
+
+</div>
+<p>Tianyuan Wu et al. “Crab: A Semantics-Aware Checkpoint/Restore Runtime for Agent Sandboxes.” arXiv:2604.28138, 2026.</p></li>
+<li><div id="ref-deltabox2026">
+
+</div>
+<p>Yunpeng Dong et al. “DeltaBox: Scaling Stateful AI Agents with Millisecond-Level Sandbox Checkpoint/Rollback.” arXiv:2605.22781, 2026.</p></li>
+<li><div id="ref-oilbird2026">
+
+</div>
+<p>Tao Jin et al. “Oilbird: Training-Free Speculative Decoding with Keys the Verifier Already Computes.” arXiv:2608.03839, 2026.</p></li>
+<li><div id="ref-saferesume2026">
+
+</div>
+<p>Guanlong Wu et al. “Safe to Resume? Breaking Execution Continuity of Agent Execution via Rollback.” arXiv:2608.29381, 2026.</p></li>
+<li><div id="ref-tclone2026">
+
+</div>
+<p>Yutong Huang et al. “TClone: Low-Latency Forking of Live GUI Environments for Computer-Use Agents.” arXiv:2605.17320, 2026.</p></li>
+<li><div id="ref-acrfence2026">
+
+</div>
+<p>Yusheng Zheng et al. “ACRFence: Preventing Semantic Rollback Attacks in Agent Checkpoint-Restore.” arXiv:2603.20625, 2026.</p></li>
+<li><div id="ref-evoundo2026">
+
+</div>
+<p>Tanmay Sah et al. “EvoUndo: Recoverability-Constrained Self-Evolution for LLM Agent Harnesses.” arXiv:2608.28363, 2026.</p></li>
+<li><div id="ref-recoverlaw2026">
+
+</div>
+<p>Sri Vatsa Vuddanti and Satwik Kumar Chittiprolu. “Recoverability Has a Law: The ERR Measure for Tool-Augmented Agents.” arXiv:2601.22352, 2026. ICML.</p></li>
+</ol>
+
+<div id="bottom"><a href="07-action-selection-under-budgets.html" rel="prev">&laquo; Action Selection Under Budgets</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="09-risk-aware-gates-verification-abstention-refusal.html" rel="next">Risk-Aware Gates: Verification, Abstention, Refusal &raquo;</a><br>&copy; 2026 Madhava Gaikwad. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
+</div>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</body>
+</html>

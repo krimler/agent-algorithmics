@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 5: Cost Models and Critical Paths — Agent Algorithmics</title>
+<meta name="description" content="The first surprising invoice is a rite of passage. An agent that cost pennies in testing bills four figures in its first production week, and the…">
+<meta name="author" content="Madhava Gaikwad">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="book">
+<meta property="og:title" content="Chapter 5: Cost Models and Critical Paths — Agent Algorithmics">
+<meta property="og:description" content="The first surprising invoice is a rite of passage. An agent that cost pennies in testing bills four figures in its first production week, and the…">
+<meta property="og:url" content="https://krimler.github.io/agent-algorithmics/05-cost-models-and-critical-paths.html">
+<link rel="canonical" href="https://krimler.github.io/agent-algorithmics/05-cost-models-and-critical-paths.html">
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Cost Models and Critical Paths", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 5, "url": "https://krimler.github.io/agent-algorithmics/05-cost-models-and-critical-paths.html"}</script>
+
+</head>
+<body>
+<div id="page">
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="04-formal-semantics-types-and-contracts.html" rel="prev">&laquo; Formal Semantics, Types, and Contracts</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="06-budget-aware-policies-and-horizon-estimation.html" rel="next">Budget-Aware Policies and Horizon Estimation &raquo;</a></div>
+<h1 id="ch:cost"><span class="part">Part I: Foundations</span>Chapter 5. Cost Models and Critical Paths</h1><p>The first surprising invoice is a rite of passage. An agent that cost pennies in testing bills four figures in its first production week, and the postmortem reaches the same conclusion every time: nobody can say where the money went. The total is known; the feature, the user, and the step responsible are not.</p>
+<p>That is a measurement failure before it is an efficiency failure, and this chapter treats the measurement first.</p>
+<p>We begin with the token, work out how token usage compounds across prompts, retrieval, and multi-step execution, and decompose the total into components that respond to different fixes. We then turn to latency, which follows different rules: cost accumulates across everything the agent does, while latency accumulates only along the critical path. Confusing the two produces optimizations that make an agent cheaper and slower, or faster and ruinous.</p>
+<p>One feature of this domain has no analogue in ordinary capacity planning. The resource becomes dramatically cheaper while it is being planned for. The price of a fixed level of capability has fallen roughly <span class="math inline">\(1{,}000\times\)</span> over three years [<a href="#ref-llmflation2024">5</a>]. Every cost model here is therefore indexed by time, and every optimization has to justify itself against the alternative of waiting six months and paying less for the same thing. Some optimizations do not survive that test, and this chapter identifies which.</p>
+<h2 id="the-token-economy">5.1 The Token Economy</h2>
+<h3 id="the-puzzle">5.1.1 The Puzzle</h3>
+<p>Consider a concrete budgeting problem. You have $1.00 to answer a single question. The language model charges $2.50 per million input tokens and $10.00 per million output tokens. The system prompt is 500 tokens and the user’s question is 50 tokens. You intend to retrieve documents to help the model, and each retrieved document averages 800 tokens. The model’s response will be about 300 tokens.</p>
+<p>How many documents can you retrieve before exceeding the budget?</p>
+<p>The arithmetic is simple, and working through it exposes the structure of token cost. Input tokens and output tokens are priced differently. Input tokens accumulate across system prompt, user message, retrieved context, and conversation history. Output length is partly under the designer’s control. Every design decision has a cost consequence.</p>
+<p>The fixed input cost is the system prompt plus the question, 550 tokens. The output is fixed at 300 tokens. The variable cost is the retrieval, at 800 input tokens per document. With <span class="math inline">\(d\)</span> documents the total input is <span class="math inline">\(550 + 800d\)</span> tokens, and the cost is <span class="math display">\[\text{Cost} = \frac{550 + 800d}{1{,}000{,}000} \times 2.50 + \frac{300}{1{,}000{,}000} \times 10.00 = 0.004375 + 0.002d.\]</span> The budget constraint <span class="math inline">\(0.004375 + 0.002d \leq 1.00\)</span> gives <span class="math inline">\(d \leq 497\)</span>.</p>
+<p>The budget permits 497 documents, and retrieving them would be a mistake. Long contexts degrade retrieval accuracy in position-dependent ways, add latency proportional to their length, and make it much harder to say which document an answer came from. The calculation gives the capacity of the budget and says nothing about the quality of spending it. Nearly every question in this chapter has this shape: affordability and effectiveness are separate axes, and the interesting designs sit where the two disagree.</p>
+<h3 id="token-pricing">5.1.2 Token Pricing</h3>
+<p>Language model APIs price computation in tokens. A token corresponds to roughly four characters of English text, or about three-quarters of a word; the sentence “The quick brown fox jumps over the lazy dog” contains nine words and about eleven tokens.</p>
+<p>Pricing distinguishes input tokens, which are sent to the model, from output tokens, which the model generates. Output tokens typically cost two to four times as much as input tokens, and the asymmetry reflects the computation: input can be processed in parallel during the prefill phase, while output is generated one token at a time.</p>
+<p>Representative prices from late 2025 appear below. The absolute numbers are a snapshot that is already drifting; the spread between rows is the durable part, and it is the part the arguments in this book rely on.</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Model</th>
+<th style="text-align: center;">Input ($/M)</th>
+<th style="text-align: center;">Output ($/M)</th>
+<th style="text-align: center;">Context</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">GPT-4o</td>
+<td style="text-align: center;">$2.50</td>
+<td style="text-align: center;">$10.00</td>
+<td style="text-align: center;">128K</td>
+</tr>
+<tr>
+<td style="text-align: left;">GPT-4o-mini</td>
+<td style="text-align: center;">$0.15</td>
+<td style="text-align: center;">$0.60</td>
+<td style="text-align: center;">128K</td>
+</tr>
+<tr>
+<td style="text-align: left;">Claude Sonnet 4</td>
+<td style="text-align: center;">$3.00</td>
+<td style="text-align: center;">$15.00</td>
+<td style="text-align: center;">200K</td>
+</tr>
+<tr>
+<td style="text-align: left;">Claude Haiku 4</td>
+<td style="text-align: center;">$0.80</td>
+<td style="text-align: center;">$4.00</td>
+<td style="text-align: center;">200K</td>
+</tr>
+<tr>
+<td style="text-align: left;">Gemini 1.5 Pro</td>
+<td style="text-align: center;">$1.25</td>
+<td style="text-align: center;">$5.00</td>
+<td style="text-align: center;">1M</td>
+</tr>
+<tr>
+<td style="text-align: left;">Gemini Flash-Lite</td>
+<td style="text-align: center;">$0.075</td>
+<td style="text-align: center;">$0.30</td>
+<td style="text-align: center;">128K</td>
+</tr>
+<tr>
+<td style="text-align: left;">Llama 4 Scout (Groq)</td>
+<td style="text-align: center;">$0.11</td>
+<td style="text-align: center;">$0.34</td>
+<td style="text-align: center;">128K</td>
+</tr>
+<tr>
+<td style="text-align: left;">DeepSeek-V3</td>
+<td style="text-align: center;">$0.27</td>
+<td style="text-align: center;">$1.10</td>
+<td style="text-align: center;">128K</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The spread in input price across these rows exceeds <span class="math inline">\(30\times\)</span>, and every row is a plausible choice for the same task. Choosing a model is therefore a cost decision of the same magnitude as choosing whether to do the work at all, which is why Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a> treats model selection as an action the policy takes rather than as a configuration constant.</p>
+<p>One cost appears in no pricing table: the encoding of the messages themselves. Tool schemas and tool results are structured data, and JSON, the default encoding, was designed for machine interchange rather than token thrift. A controlled comparison of token-optimized formats across agentic workloads found meaningful reductions in the tokens spent purely on syntax, traffic that carries no information [<a href="#ref-notation2026">12</a>]. For an agent whose context consists mostly of tool schemas and tool output, this is a saving that requires no change to the policy.</p>
+<h3 id="llmflation-the-deflation-of-intelligence">5.1.3 LLMflation: The Deflation of Intelligence</h3>
+<p>A central economic property of language models is rapid cost deflation. For a fixed level of capability, measured by benchmarks such as MMLU, inference costs have fallen by roughly an order of magnitude per year [<a href="#ref-llmflation2024">5</a>, <a href="#ref-epochpricing2025">4</a>]. When GPT-3 became publicly accessible in 2021, it achieved an MMLU score of about 42 at $60 per million tokens. By 2024 equivalent performance cost about $0.06 per million tokens. Higher capability tiers have seen similar declines, with reductions of <span class="math inline">\(60\times\)</span> or more over 18-month periods.</p>
+<p>The deflation arises from several independent factors. Each generation of accelerators delivers more compute per dollar. Inference precision has dropped from 16 bits to 8 and now to 4 for many workloads, reducing memory bandwidth and increasing throughput with little loss of quality. Software techniques such as continuous batching, Flash Attention, speculative decoding, and PagedAttention improve the utilization of existing hardware. Models trained on larger and more diverse corpora reach the same performance with fewer parameters, so that a billion-parameter model in 2025 often exceeds a 175-billion-parameter model from 2022. And open models with multiple hosting providers compress margins across the ecosystem.</p>
+<p>For agent design the implications are practical. Cost models must be indexed by time rather than treated as static. Complex optimization infrastructure may have diminishing returns. Applications that were uneconomical can become viable quickly. And a system should be designed so that a cheaper model can be substituted without architectural change.</p>
+<h2 id="cost-decomposition">5.2 Cost Decomposition</h2>
+<p>Agent cost decomposes into components with distinct behaviors and distinct optimizations, shown in Figure <a href="#fig:cost-tree">5.1</a>.</p>
+<figure id="fig:cost-tree">
+<img src="figures/05-cost-models-and-critical-paths-fig1-3e50f75386.png" />
+<figcaption><strong>Figure 5.1.</strong> Cost decomposition. Each component responds to a different intervention, which is why an unattributed total cannot be optimized.</figcaption>
+</figure>
+<h3 id="token-costs">5.2.1 Token Costs</h3>
+<p>Token costs dominate most agent workloads: <span class="math display">\[C_{\text{tokens}} = \sum_{i=1}^{n} \left( T_{\text{in}}^{(i)} p_{\text{in}} + T_{\text{out}}^{(i)} p_{\text{out}} \right),\]</span> where <span class="math inline">\(n\)</span> is the number of model calls and <span class="math inline">\(p_{\text{in}}\)</span>, <span class="math inline">\(p_{\text{out}}\)</span> are the per-token prices.</p>
+<p>In a multi-turn interaction, the input to each call includes the whole history so far: <span class="math display">\[T_{\text{in}}^{(i)} = T_{\text{system}} + \sum_{j=1}^{i-1} \left( T_{\text{user}}^{(j)} + T_{\text{assistant}}^{(j)} \right) + T_{\text{user}}^{(i)}.\]</span> This replay makes total token usage grow quadratically in the number of turns. A 20-turn conversation with 500 tokens per turn produces about 100<span>,</span>000 input tokens across all calls, although only 10<span>,</span>000 tokens were ever written. Figure <a href="#fig:replay">5.2</a> shows the growth.</p>
+<figure id="fig:replay">
+<img src="figures/05-cost-models-and-critical-paths-fig2-533ca581d4.png" />
+<figcaption><strong>Figure 5.2.</strong> History replay. With 500 tokens per turn, the text written grows linearly while the text the model reads, and is billed for, grows quadratically, because every call re-reads the entire history.</figcaption>
+</figure>
+<h3 id="tool-costs">5.2.2 Tool Costs</h3>
+<p>Tool invocations incur their own costs, <span class="math inline">\(C_{\text{tools}} = \sum_{j=1}^{m} c_{\text{tool}}^{(j)}\)</span>, and these vary widely. Web search APIs may charge cents per query. Database queries are often negligible. Code execution costs depend on runtime. External APIs can dominate the total if they are invoked frequently.</p>
+<h3 id="compute-costs">5.2.3 Compute Costs</h3>
+<p>For self-hosted models, <span class="math inline">\(C_{\text{compute}} = T_{\text{GPU}} \cdot p_{\text{GPU}}\)</span>. Self-hosting becomes economical only above some volume threshold, and the threshold is workload-specific. It depends on utilization, on the hardware one can keep busy, and on the engineering time the deployment consumes. Published total-cost-of-ownership analyses work the comparison in full for particular settings [<a href="#ref-tcoanalysis2024">18</a>]; the general lesson is that below the crossover, managed APIs usually win once operational overhead is counted, and that most teams estimate their own utilization optimistically.</p>
+<h3 id="total-cost-and-unit-cost">5.2.4 Total Cost and Unit Cost</h3>
+<p>The total aggregates the components, <span class="math inline">\(C_{\text{total}} = C_{\text{tokens}} + C_{\text{tools}} + C_{\text{compute}}\)</span>. A more informative quantity is the <em>unit cost</em>, <span class="math display">\[C_{\text{unit}} = \frac{C_{\text{total}}}{N_{\text{success}}},\]</span> the cost per successful outcome. Unit cost captures both efficiency and effectiveness: a system that fails frequently may appear cheap per request and be expensive per success.</p>
+<h2 id="critical-path-analysis">5.3 Critical Path Analysis</h2>
+<p>Cost alone does not determine usability. Latency determines whether users tolerate an agent, and latency obeys different arithmetic.</p>
+<h3 id="latency-decomposition">5.3.1 Latency Decomposition</h3>
+<p>Total latency decomposes as <span class="math inline">\(T_{\text{total}} = T_{\text{queue}} + T_{\text{critical}}\)</span>, where the queue term covers waiting for capacity and the critical term covers the longest dependent chain of work. For a single model call, <span class="math display">\[T_{\text{LLM}} = T_{\text{TTFT}} + n_{\text{out}} \cdot T_{\text{per-token}},\]</span> where <span class="math inline">\(T_{\text{TTFT}}\)</span> is the time to the first token, which includes reading the prompt, and the second term is the generation time.</p>
+<h3 id="critical-path-in-multi-step-agents">5.3.2 Critical Path in Multi-Step Agents</h3>
+<p>In a <span class="math inline">\(k\)</span>-step ReAct agent, the steps are sequential and the critical path is their sum: <span class="math display">\[T_{\text{critical}} = \sum_{i=1}^{k} \left( T_{\text{LLM}}^{(i)} + T_{\text{tool}}^{(i)} \right).\]</span> Sequential dependencies dominate latency. Parallelization shortens the critical path and may increase total cost, since more work runs in total.</p>
+<h3 id="critical-path-in-multi-agent-systems">5.3.3 Critical Path in Multi-Agent Systems</h3>
+<p>Multi-agent systems trade coordination overhead for parallelism. When <span class="math inline">\(k\)</span> agents run concurrently and an aggregator combines their results, <span class="math display">\[T_{\text{parallel}} = \max_i T_{\text{agent}_i} + T_{\text{aggregation}},\]</span> while the cost is the sum over all agents. Figure <a href="#fig:critical-path">5.3</a> illustrates the difference. The Anthropic research system [<a href="#ref-anthropicresearch2025">2</a>] exploits this structure to reduce latency on complex queries.</p>
+<figure id="fig:critical-path">
+<img src="figures/05-cost-models-and-critical-paths-fig3-69bd14abdb.png" />
+<figcaption><strong>Figure 5.3.</strong> Cost sums; latency follows the critical path. Running the three searches concurrently cuts wall-clock time from 12.5 to 7 seconds while the total work, and therefore the bill, is unchanged.</figcaption>
+</figure>
+<h3 id="latencycost-trade-offs">5.3.4 Latency–Cost Trade-offs</h3>
+<p>Some optimizations improve both latency and cost; caching is the chief example. Others trade one for the other: batching lowers cost and raises latency for the earliest request in the batch, while speculation lowers latency and raises cost. Production systems typically optimize the 95th-percentile latency rather than the mean, because the tail is what users notice.</p>
+<h2 id="caching-strategies">5.4 Caching Strategies</h2>
+<p>Caching is the one optimization that improves cost and latency at the same time. Everything else in this chapter trades one against the other. That makes caching the first thing to reach for and, because it introduces staleness and correctness questions, the thing most likely to be reached for carelessly.</p>
+<p>Four layers of reuse exist in an agent stack, and they exploit different redundancies. Understanding which redundancy each captures tells you which layers will actually fire on your traffic.</p>
+<h3 id="kv-cache">5.4.1 KV Cache</h3>
+<p>During generation, every new token attends to every previous token. Recomputing the key and value projections of the earlier tokens at each step would make generation quadratic in the sequence length. The <em>KV cache</em> stores them, reducing generation to linear time at the cost of memory that grows with the context length.</p>
+<p>For agents this shifts the binding constraint. Compute stops being the limit and memory bandwidth becomes it, because the cache for a long-context agent can exceed the model weights themselves. PagedAttention [<a href="#ref-vllm2023">7</a>] manages the cache in fixed-size blocks, as an operating system manages pages, which raises the achievable batch size substantially.</p>
+<p>Agentic workloads stress this differently from chat. They run long contexts, multi-turn structure, and repeated tool-call formatting, and a recent survey of system-aware KV optimization catalogs the techniques that follow from those properties [<a href="#ref-kvsurvey2026">11</a>]. Quantization aimed specifically at agentic inference pushes cache precision lower than chat workloads tolerate, exploiting the fact that much of an agent’s context is structured, repetitive tool traffic rather than prose [<a href="#ref-triaxialkv2026">15</a>].</p>
+<p>One consequence deserves mention here because it reappears in Chapter <a href="08-speculation-parallelism-and-commit-protocols.html#ch:speculation">8</a>. The KV cache is state. It survives operations the application regards as cleanup, and an agent that abandons a reasoning branch does not thereby remove the branch from the cache [<a href="#ref-abortedkv2026">8</a>]. Caching is a performance mechanism with correctness consequences.</p>
+<h3 id="prompt-caching">5.4.2 Prompt Caching</h3>
+<p>Prompt caching reuses the prefill computation for a prefix shared across requests. An agent with a 3<span>,</span>000-token system prompt and a stable tool schema pays for that prefix on every call; caching it means paying full price once and a reduced rate thereafter.</p>
+<p>Providers price this in a characteristic shape. A cache write costs somewhat more than an uncached token, a cache read costs dramatically less, and the cache expires after a short idle period. Savings on cached tokens typically fall in the 50–90% range.</p>
+<p>The pricing dictates the prompt layout. Everything stable goes at the front: system instructions, tool definitions, few-shot examples. Everything variable goes at the back. A single user-specific token near the beginning invalidates the entire suffix, so the common mistake of interpolating a user identifier or a timestamp into the system prompt can eliminate the cache benefit while appearing to do nothing.</p>
+<p>Let <span class="math inline">\(f\)</span> be the fraction of tokens in the cacheable prefix, <span class="math inline">\(h\)</span> the hit rate, <span class="math inline">\(r\)</span> the read multiplier, and <span class="math inline">\(w\)</span> the write multiplier. The relative cost is <span class="math display">\[\frac{C_{\text{cached}}}{C_{\text{base}}} = (1-f) + f\big[h \cdot r + (1-h)\cdot w\big].\]</span> With <span class="math inline">\(r = 0.1\)</span>, <span class="math inline">\(w = 1.25\)</span>, <span class="math inline">\(f = 0.8\)</span>, and <span class="math inline">\(h = 0.9\)</span>, this is about <span class="math inline">\(0.30\)</span>, a 70% reduction. Setting the bracket equal to 1 gives the break-even hit rate, <span class="math display">\[h^{*} = \frac{w-1}{w-r},\]</span> which for these constants is about <span class="math inline">\(0.22\)</span>. Below a 22% hit rate, caching costs more than it saves. The threshold is low enough that caching is almost always correct and high enough that a badly ordered prompt can lose money.</p>
+<h3 id="semantic-caching">5.4.3 Semantic Caching</h3>
+<p>Semantic caching goes further. It embeds the incoming query, searches for a previously answered query within some similarity threshold, and returns the stored response. A hit skips inference entirely, so the saving is total rather than partial.</p>
+<p>Caching designed for chatbots transfers poorly to agents, because an agent’s output depends on external data and environmental context that a query embedding does not capture. Caching at the level of the agent’s <em>plan</em> rather than its response addresses this more directly [<a href="#ref-plancache2025">19</a>].</p>
+<p>The threshold is the entire design. Set it loose and the cache answers “what is our refund policy for enterprise customers” with the response to “what is our refund policy,” a correctness failure that looks like a latency improvement. Set it tight and the hit rate collapses. Unlike the lower layers, a semantic cache can return a wrong answer, so it belongs behind the same kind of gate as any other action that commits to a result, and it should be scoped by tenant and by permission. A cache shared across users is an access-control boundary that nobody reviewed.</p>
+<p>Semantic caching suits high-volume, low-variance traffic such as support FAQs, documentation lookup, and repeated internal queries. It suits open-ended research poorly, because the premise of a research agent is that the question has not been asked before.</p>
+<h3 id="semantic-cache-keys-are-fuzzy-hashes">5.4.4 Semantic Cache Keys Are Fuzzy Hashes</h3>
+<p>The threshold problem has a sharper statement. Treat a semantic cache key as a fuzzy hash and a tension becomes formal. Cache hit rates require <em>locality</em>: nearby inputs map to nearby keys. Collision resistance requires the opposite, the avalanche property, under which a small input change produces a large key change. A semantic cache cannot have both, and the trade is inherent rather than an artifact of any particular embedding [<a href="#ref-cachecollision2026">21</a>].</p>
+<p>The security consequence is a key-collision attack. An adversary who can shape queries can engineer a collision and cause the cache to serve one user’s response to another, a confidentiality failure in the costume of a performance optimization.</p>
+<p>Two design rules follow. Scope semantic caches by tenant and permission, so that a collision cannot cross a trust boundary. And treat a cache hit as a proposal that passes a gate rather than as an answer, exactly as Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a> treats any other action with a nonzero error rate.</p>
+<h3 id="multi-layer-caching-architecture">5.4.5 Multi-Layer Caching Architecture</h3>
+<p>Production systems layer all of these, cheapest check first, as Figure <a href="#fig:cache-layers">5.4</a> shows.</p>
+<figure id="fig:cache-layers">
+<img src="figures/05-cost-models-and-critical-paths-fig4-388f869d7a.png" />
+<figcaption><strong>Figure 5.4.</strong> Three cache layers, each capturing a different redundancy. A workload with no repeated questions still benefits from the lower two, which is why the layers are tracked separately rather than as one hit rate.</figcaption>
+</figure>
+<p>Multi-agent systems complicate this picture. When several agents share a large context, naive cache reuse across candidates can change results rather than merely accelerate them, since the interaction between candidates carries information that reuse discards [<a href="#ref-kvreuse2026">17</a>]. Measure quality as well as hit rate.</p>
+<h3 id="the-scheduler-does-not-know-you-are-an-agent">5.4.6 The Scheduler Does Not Know You Are an Agent</h3>
+<p>One assumption runs beneath all of the above, and it is false on shared infrastructure. GPU schedulers treat each model call as an independent request. An agent executing a hundred chained calls therefore has its intermediate state discarded between steps, so the KV cache built during step 7 is gone by step 8 and is rebuilt from scratch. Measured end to end, this request-level abstraction inflates agent latency by a reported factor of three to eight [<a href="#ref-saga2026">22</a>].</p>
+<p>The fix makes the workflow rather than the call the schedulable unit. Capturing the agent’s execution graph lets the scheduler predict which KV state will be reused across tool-call boundaries and keep it resident. This is program-level scheduling, and it recovers latency that no prompt-side optimization can reach, because the loss occurs below the API.</p>
+<p>Related work treats agent networks as a queueing-control problem in which contextual memory state, including prefix blocks and verified tool outputs, alters service rates rather than sitting passively as a cache [<a href="#ref-backpressure2026">20</a>]. The framing matters for capacity planning: an agent fleet’s throughput depends on state locality, so scheduling decisions and cache decisions are the same decision. For a self-hosted deployment this is actionable now. For a hosted provider it explains a gap between measured latency and the vendor’s published per-call numbers.</p>
+<h2 id="cost-optimization-strategies">5.5 Cost Optimization Strategies</h2>
+<p>With measurement in place, the interventions below are roughly ordered by return on effort. The multipliers compose, which is why a system that applies four of them lands an order of magnitude below the naive implementation.</p>
+<p><em>Cascading.</em> Attempt the task with a small model and escalate on low confidence. Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a> derives the escalation threshold; the summary is that cascading exploits the fact that most queries are easy and pricing is steeply tiered. BudgetMLAgent reports a 94% cost reduction through multi-model orchestration on its workload [<a href="#ref-budgetmlagent2024">3</a>]. The complication, developed in Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a>, is that the escalation decision needs <em>calibrated</em> confidence, and most deployed routers lack it [<a href="#ref-ucci2026">16</a>].</p>
+<p><em>Context management.</em> Input tokens dominate multi-turn agents because history is replayed on every call. Trajectory compression cuts what is replayed [<a href="#ref-agentdiet2024">1</a>]; observation masking drops the bulky middles of tool outputs that the model never referenced. Chapter <a href="10-memory-state-and-forgetting.html#ch:memory">10</a> covers the mechanics and the failure modes, of which there are more than the cost literature suggests.</p>
+<p><em>Output control.</em> Output tokens cost several times input tokens, and output length is one of the few quantities fully under the designer’s control. Requesting structured output instead of prose, capping reasoning length by task difficulty, and forbidding restatement of the question are unglamorous and reliably effective.</p>
+<p><em>Early stopping.</em> Agents routinely continue past the point of diminishing return, taking steps that do not change the answer. The gain comes from deciding <em>when to stop</em> rather than from adding capability [<a href="#ref-budgettooluse2026">9</a>], and Chapter <a href="06-budget-aware-policies-and-horizon-estimation.html#ch:budgets">6</a> makes stopping a policy decision with an explicit criterion.</p>
+<p><em>Batching.</em> Batching amortizes fixed overhead across requests at the cost of latency for the earliest arrival. It is correct for offline and background work and usually wrong for interactive paths.</p>
+<p><em>Encoding.</em> Switching tool-call payloads away from verbose JSON reduces the tokens spent on syntax [<a href="#ref-notation2026">12</a>]. The saving is a small percentage, carries no risk, and applies to every call.</p>
+<p><em>Topology.</em> In multi-agent systems the communication graph is itself a cost variable. Choosing backbone models per role and then optimizing the topology under a budget [<a href="#ref-scmas2026">14</a>], or routing dynamically on observed progress [<a href="#ref-progrouter2026">13</a>], addresses a cost that single-agent thinking cannot see.</p>
+<h2 id="cost-monitoring-and-attribution">5.6 Cost Monitoring and Attribution</h2>
+<p>An unattributed total cannot be acted on. If all that is known is that last month cost $40<span>,</span>000, every optimization proposal is a guess. Attribution converts the number into a decision.</p>
+<p>Instrument along four dimensions, all of which should be available on every trace event described in Chapter <a href="14-trace-semantics-and-agent-telemetry.html#ch:traces">14</a>:</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Dimension</th>
+<th style="text-align: left;">Question it answers</th>
+<th style="text-align: left;">Typical finding</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Component</td>
+<td style="text-align: left;">Which step spends?</td>
+<td style="text-align: left;">One tool dominates</td>
+</tr>
+<tr>
+<td style="text-align: left;">Task type</td>
+<td style="text-align: left;">Which workload spends?</td>
+<td style="text-align: left;">A rare task type dominates</td>
+</tr>
+<tr>
+<td style="text-align: left;">User / tenant</td>
+<td style="text-align: left;">Who spends?</td>
+<td style="text-align: left;">A small percentile dominates</td>
+</tr>
+<tr>
+<td style="text-align: left;">Outcome</td>
+<td style="text-align: left;">Was it spent well?</td>
+<td style="text-align: left;">Failures cost more than successes</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The outcome dimension is the one teams skip and the one that pays. Cost per <em>successful</em> task is the metric that matters, and it behaves differently from cost per request: <span class="math display">\[C_{\text{unit}} = \frac{C_{\text{total}}}{N_{\text{success}}} = \frac{\bar{c}_{\text{req}}}{p_{\text{success}}}.\]</span> A system with an 80% success rate pays a <span class="math inline">\(1.25\times\)</span> multiplier on every request; at 50% it pays <span class="math inline">\(2\times\)</span>. Reliability is therefore a cost optimization, and frequently a larger one than any efficiency measure, because failed runs consume full price and produce nothing. Failures also skew expensive: a run that fails at step 12 has paid for 12 steps.</p>
+<p>Two costs are routinely omitted from dashboards. Retries are attributed to the successful attempt, if they are attributed at all. And storage accrues silently: agent runs leave behind logs, context snapshots, checkpoints, and debug traces that persist, a footprint that benchmarks and cost models have largely ignored [<a href="#ref-footprint2026">10</a>]. For a fleet of long-running agents this is a real line item.</p>
+<h2 id="worked-example-a-cost-optimized-research-agent">5.7 Worked Example: A Cost-Optimized Research Agent</h2>
+<p>A research agent answers analyst questions over an internal corpus and handles 50<span>,</span>000 queries per month. The naive implementation routes everything to a frontier model, retrieves ten documents per query, and replays the full history across an average of four turns.</p>
+<p><em>Baseline.</em> Per query: a 1<span>,</span>500-token system prompt, ten documents at 800 tokens each, 200 tokens of question, and roughly 600 tokens of output per turn, with history replayed each turn.</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Component</th>
+<th style="text-align: right;">Tokens/query</th>
+<th style="text-align: right;">$/query</th>
+<th style="text-align: right;">$/month</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">System prompt (replayed <span class="math inline">\(4\times\)</span>)</td>
+<td style="text-align: right;">6<span>,</span>000</td>
+<td style="text-align: right;">0.015</td>
+<td style="text-align: right;">750</td>
+</tr>
+<tr>
+<td style="text-align: left;">Retrieved documents (<span class="math inline">\(10\times800\)</span>, replayed)</td>
+<td style="text-align: right;">20<span>,</span>000</td>
+<td style="text-align: right;">0.050</td>
+<td style="text-align: right;">2<span>,</span>500</td>
+</tr>
+<tr>
+<td style="text-align: left;">History accumulation</td>
+<td style="text-align: right;">4<span>,</span>800</td>
+<td style="text-align: right;">0.012</td>
+<td style="text-align: right;">600</td>
+</tr>
+<tr>
+<td style="text-align: left;">Output (<span class="math inline">\(4 \times 600\)</span>)</td>
+<td style="text-align: right;">2<span>,</span>400</td>
+<td style="text-align: right;">0.024</td>
+<td style="text-align: right;">1<span>,</span>200</td>
+</tr>
+<tr>
+<td style="text-align: left;">Total</td>
+<td style="text-align: right;">33<span>,</span>200</td>
+<td style="text-align: right;">0.101</td>
+<td style="text-align: right;">5<span>,</span>050</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>We now apply four interventions in sequence, measuring each against a held-out accuracy set rather than assuming it is free.</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">#</th>
+<th style="text-align: left;">Intervention</th>
+<th style="text-align: right;">$/month</th>
+<th style="text-align: right;">Accuracy</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">0</td>
+<td style="text-align: left;">Baseline</td>
+<td style="text-align: right;">5<span>,</span>050</td>
+<td style="text-align: right;">84.0%</td>
+</tr>
+<tr>
+<td style="text-align: left;">1</td>
+<td style="text-align: left;">Prompt-cache the stable prefix (<span class="math inline">\(h=0.9\)</span>)</td>
+<td style="text-align: right;">4<span>,</span>430</td>
+<td style="text-align: right;">84.0%</td>
+</tr>
+<tr>
+<td style="text-align: left;">2</td>
+<td style="text-align: left;">Retrieve 4 documents with reranking instead of 10</td>
+<td style="text-align: right;">3<span>,</span>180</td>
+<td style="text-align: right;">84.6%</td>
+</tr>
+<tr>
+<td style="text-align: left;">3</td>
+<td style="text-align: left;">Cascade: small model first, escalate 25%</td>
+<td style="text-align: right;">1<span>,</span>560</td>
+<td style="text-align: right;">83.1%</td>
+</tr>
+<tr>
+<td style="text-align: left;">4</td>
+<td style="text-align: left;">Compress history; cap output at 400 tokens</td>
+<td style="text-align: right;">1<span>,</span>160</td>
+<td style="text-align: right;">82.3%</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The total reduction is 77%, at a cost of 1.7 accuracy points. The middle rows carry the lesson. Step 1 is free: identical outputs, lower bill. Step 2 <em>improved</em> accuracy while cutting cost by a third, because retrieving ten documents had been introducing distractors, so the cheaper configuration was also the better one. Steps 3 and 4 are genuine trades that spend accuracy for money.</p>
+<p>The frontier, then, is not a smooth curve one slides along. It contains free moves, strictly better moves, and real trades, and they have to be identified separately. A team that treats all four as “cost optimization” will negotiate about the 1.7-point drop without noticing that the first two steps cost nothing.</p>
+<p>Whether the last two steps are acceptable depends on what a wrong answer costs. For exploratory analyst queries where the user sees the citations and can check them, 82.3% at $1<span>,</span>160 is an easy decision. For a system whose output feeds an automated decision, the 1.7 points may be worth $400 a month several times over, and Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a> gives the machinery for deciding rather than guessing.</p>
+<h2 id="the-costquality-frontier">5.8 The Cost–Quality Frontier</h2>
+<p>Plot every measured configuration with cost on one axis and quality on the other, as in Figure <a href="#fig:frontier">5.5</a>. Most points are dominated: some other configuration is both cheaper and better. The undominated points form the frontier, and the only interesting question is where on it to sit.</p>
+<figure id="fig:frontier">
+<img src="figures/05-cost-models-and-critical-paths-fig5-01534be00b.png" />
+<figcaption><strong>Figure 5.5.</strong> The configurations from the worked example. The baseline and the cached variant are dominated by the reranked one, which is cheaper and more accurate. The dashed line is the frontier: from there on, saving money costs accuracy, and the choice of point is a product decision.</figcaption>
+</figure>
+<p>Two properties make this harder than a standard Pareto analysis. The frontier moves: inference prices fall by roughly an order of magnitude per year for a fixed capability level [<a href="#ref-llmflation2024">5</a>, <a href="#ref-epochpricing2025">4</a>], so a configuration that is unaffordable today is routine within a year, and a sufficiently complex optimization can be obsolete before it finishes paying for itself. One should ask how long an optimization takes to build, maintain, and validate, against the possibility of buying the same saving by waiting. This argues for a specific bias: prefer optimizations that are cheap to build and architectural rather than clever. A cache-friendly prompt layout keeps paying. A hand-tuned distillation pipeline for one model version does not, and it becomes a liability when that model is deprecated. Build for the ability to swap in a cheaper model without changing the architecture, and let deflation do the work that deflation does well.</p>
+<p>The second property is that quality is not a scalar. The worked example collapsed it to one accuracy number, which hid the fact that step 2 improved grounding while step 3’s escalation errors clustered on exactly the hard queries that analysts cared about most. Chapter <a href="15-evaluation-stability-cost-and-behavioral-fidelity.html#ch:evaluation">15</a> takes this up in earnest.</p>
+<h2 id="summary">5.9 Summary</h2>
+<p>Cost in an agent system is an accumulation problem, and accumulation is invisible until it is instrumented.</p>
+<p>Token costs dominate, and multi-turn history replay makes them grow super-linearly in the number of turns. The total decomposes into tokens, tools, compute, and the storage that agent runs leave behind, and each component responds to a different fix. The honest denominator is successes rather than requests, since reliability is a cost lever and usually a larger one than efficiency.</p>
+<p>Latency follows the critical path rather than the total, so parallel work is free in latency terms and never free in cost terms. Caching is the only intervention that improves both, and it comes in three layers that exploit three different redundancies. Every other intervention trades quality or latency for money; cascading, context management, output control, and early stopping all belong to that group, and their trades should be measured rather than assumed.</p>
+<p>The whole frontier slides downward by about an order of magnitude a year. Optimizations that are architectural keep paying. Optimizations that are clever and version-specific are usually a slower way of buying what deflation would have provided.</p>
+<p>Chapter <a href="06-budget-aware-policies-and-horizon-estimation.html#ch:budgets">6</a> takes the next step and makes the budget a state variable that the policy can see and act on, rather than a limit it discovers by hitting.</p>
+<h2 id="common-misunderstandings">5.10 Common Misunderstandings</h2>
+<p><em>Optimize first, measure later.</em> Intuition about where an agent spends money is reliably wrong. The usual culprit is history replay, which is invisible in the code because nobody wrote a line that says “send the entire conversation again.”</p>
+<p><em>Input tokens are the bill.</em> Output costs several times input per token. A verbose response format can outweigh a large retrieved context.</p>
+<p><em>Mean cost describes the system.</em> Cost distributions across agent tasks are heavy-tailed. A 99th-percentile run that takes 40 steps instead of 4 can carry a substantial share of the monthly total, and the mean will not show it. Budget against the tail, and see Chapter <a href="15-evaluation-stability-cost-and-behavioral-fidelity.html#ch:evaluation">15</a> on why the mean is the wrong summary for most of what an agent does.</p>
+<p><em>Failures are cheap because they are incomplete.</em> Failed runs pay full price for every step they took, and they take more steps than successes because agents retry. Cost per success is the honest denominator.</p>
+<p><em>Cache hit rate measures cache value.</em> A semantic cache with an excellent hit rate and a loose threshold is a machine for confidently answering questions nobody asked.</p>
+<p><em>Cost attribution can omit the outcome.</em> Without knowing whether a run succeeded, a dashboard can rank components by spend and never by waste.</p>
+<p><em>Latency and cost can be optimized with one lever.</em> Batching improves cost and worsens latency. Speculation improves latency and worsens cost. Only caching improves both, which is why it comes first.</p>
+<h2 class="unnumbered" id="exercises">Exercises</h2>
+<ol>
+<li><p><strong>Cost calculation.</strong> An agent uses GPT-4o ($2.50/M input, $10/M output) with a 1<span>,</span>500-token system prompt. Each query averages 200 input tokens and 400 output tokens, and the agent makes 3 model calls per task with full context replay. Calculate (a) the cost per task, (b) the cost for 50<span>,</span>000 tasks per month, and (c) the saving if prompt caching achieves a 90% hit rate on the system prompt.</p></li>
+<li><p><strong>Critical path analysis.</strong> A multi-agent system consists of a router (0.5 s), two parallel workers (2 s and 3 s), an aggregator (1 s), and a final response (1.5 s). Calculate (a) the critical-path latency, (b) the latency if the workers ran sequentially, and (c) the latency reduction from parallelization.</p></li>
+<li><p><strong>Model cascade design.</strong> Design a cascading strategy for a customer-service agent handling 100<span>,</span>000 queries per day, given GPT-4o-mini ($0.15/M in, $0.60/M out, 80% accuracy) and GPT-4o ($2.50/M in, $10/M out, 95% accuracy). Estimate (a) the cost with GPT-4o alone, (b) the cost with a cascade that tries mini first and escalates failures, and (c) the expected accuracy of the cascade.</p></li>
+<li><p><strong>Cache break-even.</strong> A prompt caching system has a write cost of <span class="math inline">\(1.25\times\)</span> base, a read cost of <span class="math inline">\(0.1\times\)</span> base, a hit rate <span class="math inline">\(h\)</span>, and a 3<span>,</span>000-token system prompt. Derive (a) the cost saving as a function of <span class="math inline">\(h\)</span>, (b) the minimum <span class="math inline">\(h\)</span> for a positive saving, and (c) the saving at <span class="math inline">\(h = 0.8\)</span>.</p></li>
+<li><p><strong>LLMflation planning.</strong> A system costs $50<span>,</span>000 per month today. Assuming a <span class="math inline">\(10\times\)</span> annual cost reduction for equivalent capability, (a) project costs for years 1, 2, and 3, (b) calculate the net present value of a $100<span>,</span>000 optimization investment that reduces current costs by 50%, and (c) recommend whether to invest or wait.</p></li>
+</ol>
+<h2 class="unnumbered" id="bibliographic-notes">Bibliographic Notes</h2>
+<p>The LLMflation analysis documenting a <span class="math inline">\(10\times\)</span> annual cost reduction appears in [<a href="#ref-llmflation2024">5</a>]. Epoch AI’s analysis [<a href="#ref-epochpricing2025">4</a>] shows <span class="math inline">\(9\times\)</span> to <span class="math inline">\(900\times\)</span> annual price declines depending on capability tier, with a median of <span class="math inline">\(200\times\)</span> in recent periods.</p>
+<p>KV caching is standard in transformer inference; PagedAttention [<a href="#ref-vllm2023">7</a>] introduced the efficient memory management now adopted across inference frameworks. Prompt caching implementations are documented by Anthropic, OpenAI, and Google in their API documentation.</p>
+<p>BudgetMLAgent [<a href="#ref-budgetmlagent2024">3</a>] demonstrates a 94% cost reduction through model cascading. AgentDiet [<a href="#ref-agentdiet2024">1</a>] shows trajectory compression for agent cost reduction. The State of Agent Engineering survey [<a href="#ref-stateofagent2025">6</a>] documents that latency has become the second-largest challenge (20% of respondents) while cost concerns have decreased.</p>
+<p>Critical path analysis for distributed systems is classical; its application to agents adapts these concepts to the particular characteristics of autoregressive generation and multi-turn interaction.</p>
+<h2 class="unnumbered" id="bibliography">Bibliography</h2>
+<ol>
+<li><div id="ref-agentdiet2024">
+
+</div>
+<p>Yuan-An Xiao, Pengfei Gao, Chao Peng et al. Reducing Cost of LLM Agents with Trajectory Reduction. <span><em>arXiv:2509.23586</em></span>, 2025.</p></li>
+<li><div id="ref-anthropicresearch2025">
+
+</div>
+<p>Anthropic. How We Built Our Multi-Agent Research System. Engineering blog, 2025.</p></li>
+<li><div id="ref-budgetmlagent2024">
+
+</div>
+<p>A. Gandhi et al. BudgetMLAgent: A Cost-Effective LLM Multi-Agent System for Automating Machine Learning Tasks. <span><em>arXiv:2411.07464</em></span>, 2024.</p></li>
+<li><div id="ref-epochpricing2025">
+
+</div>
+<p>B. Cottier, B. Snodin, D. Owen, T. Adamczewski. LLM Inference Prices Have Fallen Rapidly but Unequally Across Tasks. Epoch AI, March 2025.</p></li>
+<li><div id="ref-llmflation2024">
+
+</div>
+<p>G. Fang, M. Casado. Welcome to LLMflation: LLM Inference Cost is Going Down Fast. Andreessen Horowitz, November 2024.</p></li>
+<li><div id="ref-stateofagent2025">
+
+</div>
+<p>LangChain. State of Agent Engineering. Survey report, December 2025.</p></li>
+<li><div id="ref-vllm2023">
+
+</div>
+<p>W. Kwon, et al. Efficient Memory Management for Large Language Model Serving with PagedAttention. <span><em>SOSP</em></span>, 2023.</p></li>
+<li><div id="ref-abortedkv2026">
+
+</div>
+<p>Guijia Zhang and Harry Yang. “Aborted but Not Forgotten: KV-Cache Retention Breaks Rollback Consistency in Language Agents.” arXiv:2608.15939, 2026.</p></li>
+<li><div id="ref-budgettooluse2026">
+
+</div>
+<p>Tengxiao Liu et al. “Budget-Aware Tool Use Enables Effective Agent Scaling.” arXiv:2511.17006, 2025. COLM 2026.</p></li>
+<li><div id="ref-footprint2026">
+
+</div>
+<p>Chenglin Yu et al. “The Hidden Footprint: Making Storage a First-Class Metric for LLM Agent Evaluation.” arXiv:2607.11149, 2026.</p></li>
+<li><div id="ref-kvsurvey2026">
+
+</div>
+<p>Jiantong Jiang et al. “Towards Efficient Large Language Model Serving: A Survey on System-Aware KV Cache Optimization.” arXiv:2607.08057, 2026. ACL 2026.</p></li>
+<li><div id="ref-notation2026">
+
+</div>
+<p>Lorenz Kutschka and Bernhard Geiger. “Notation Matters: A Benchmark Study of Token-Optimized Formats in Agentic AI Systems.” arXiv:2605.29676, 2026.</p></li>
+<li><div id="ref-progrouter2026">
+
+</div>
+<p>Songyuan Li et al. “ProgRouter: Online Progress-Guided Orchestration for Multi-Agent LLM Workflows under Quality-Cost Tradeoffs.” arXiv:2608.25992, 2026. EMNLP 2026.</p></li>
+<li><div id="ref-scmas2026">
+
+</div>
+<p>Di Zhao et al. “SC-MAS: Constructing Cost-Efficient Multi-Agent Systems with Edge-Level Heterogeneous Collaboration.” arXiv:2601.09434, 2026.</p></li>
+<li><div id="ref-triaxialkv2026">
+
+</div>
+<p>Hanzhang Shen et al. “TriAxialKV: Toward Extreme Low-Precision KV-Cache Quantization for Agentic Inference Tasks.” arXiv:2605.17170, 2026.</p></li>
+<li><div id="ref-ucci2026">
+
+</div>
+<p>Varun Kotte. “UCCI: Calibrated Uncertainty for Cost-Optimal LLM Cascade Routing.” arXiv:2605.18796, 2026.</p></li>
+<li><div id="ref-kvreuse2026">
+
+</div>
+<p>Sichu Liang et al. “When KV Cache Reuse Fails in Multi-Agent Systems: Cross-Candidate Interaction is Crucial for LLM Judges.” arXiv:2601.08343, 2026.</p></li>
+<li><div id="ref-tcoanalysis2024">
+
+</div>
+<p>Amit Sharma, Teodor-Dumitru Ene, Kishor Kunal et al. “Assessing Economic Viability: A Comparative Analysis of Total Cost of Ownership for Domain-Adapted Large Language Models versus State-of-the-art Counterparts.” arXiv:2404.08850, 2024.</p></li>
+<li><div id="ref-plancache2025">
+
+</div>
+<p>Qizheng Zhang, Michael Wornow, and Gerry Wan. “Agentic Plan Caching: Test-Time Memory for Fast and Cost-Efficient LLM Agents.” arXiv:2506.14852, 2025.</p></li>
+<li><div id="ref-backpressure2026">
+
+</div>
+<p>Zuyuan Zhang et al. “Augmented Backpressure for Decentralized Management of Agentic Networks.” arXiv:2608.00914, 2026.</p></li>
+<li><div id="ref-cachecollision2026">
+
+</div>
+<p>Zhixiang Zhang et al. “From Similarity to Vulnerability: Key Collision Attack on LLM Semantic Caching.” arXiv:2601.23088, 2026. ICML 2026.</p></li>
+<li><div id="ref-saga2026">
+
+</div>
+<p>Dongxin Guo et al. “SAGA: Workflow-Atomic Scheduling for AI Agent Inference on GPU Clusters.” arXiv:2605.00528, 2026.</p></li>
+</ol>
+
+<div id="bottom"><a href="04-formal-semantics-types-and-contracts.html" rel="prev">&laquo; Formal Semantics, Types, and Contracts</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="06-budget-aware-policies-and-horizon-estimation.html" rel="next">Budget-Aware Policies and Horizon Estimation &raquo;</a><br>&copy; 2026 Madhava Gaikwad. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
+</div>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</body>
+</html>

@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 2: Mathematical Foundations — Agent Algorithmics</title>
+<meta name="description" content="This chapter assembles the mathematical tools that the rest of the book depends on. There are five of them: sequential decision making, constrained…">
+<meta name="author" content="Madhava Gaikwad">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="book">
+<meta property="og:title" content="Chapter 2: Mathematical Foundations — Agent Algorithmics">
+<meta property="og:description" content="This chapter assembles the mathematical tools that the rest of the book depends on. There are five of them: sequential decision making, constrained…">
+<meta property="og:url" content="https://krimler.github.io/agent-algorithmics/02-mathematical-foundations.html">
+<link rel="canonical" href="https://krimler.github.io/agent-algorithmics/02-mathematical-foundations.html">
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Mathematical Foundations", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 2, "url": "https://krimler.github.io/agent-algorithmics/02-mathematical-foundations.html"}</script>
+
+</head>
+<body>
+<div id="page">
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="01-terms-and-operational-definitions.html" rel="prev">&laquo; Terms and Operational Definitions</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="03-a-short-history-of-agents-control-and-commitment.html" rel="next">A Short History of Agents, Control, and Commitment &raquo;</a></div>
+<h1 id="ch:math"><span class="part">Part I: Foundations</span>Chapter 2. Mathematical Foundations</h1><p>This chapter assembles the mathematical tools that the rest of the book depends on. There are five of them: sequential decision making, constrained optimization, probability and expectation, complexity analysis, and a small set of data structures. Each section opens with a puzzle that can be worked in one’s head, develops the idea on a small example, and only then states the formalism. A reader for whom a section’s puzzle is already routine can move to the next section; nothing here is required twice.</p>
+<p>Each tool earns its place by reappearing later. Sequential decision making underlies the action-selection and speculation machinery of Chapters <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a> and <a href="08-speculation-parallelism-and-commit-protocols.html#ch:speculation">8</a>. Constrained optimization is the language of Chapters <a href="05-cost-models-and-critical-paths.html#ch:cost">5</a> through <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a>. Probability and expectation supply the thresholds of Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a>. Complexity analysis and data structures decide whether the memory and retrieval designs of Chapters <a href="10-memory-state-and-forgetting.html#ch:memory">10</a> and <a href="11-retrieval-and-evidence-management.html#ch:retrieval">11</a> are practical at all.</p>
+<p>The chapter that follows this one, on the history of the ideas, is the one place in the book that can be read out of order. It supplies context, and nothing later depends on it.</p>
+<h2 id="sequential-decision-making">2.1 Sequential Decision Making</h2>
+<h3 id="the-puzzle">2.1.1 The Puzzle</h3>
+<p>Consider the following game. You stand in a room with two doors. Behind one door is $100; behind the other is nothing. You choose a door, collect whatever is behind it, and enter a new room, which also has two doors. The game continues for ten rooms.</p>
+<p>The doors are labeled, and the labels carry information. A door labeled A leads to $100 with probability 0.8. A door labeled B leads to $100 with probability 0.6, and the room it leads to always has better odds than the room you are in.</p>
+<p>What strategy should you follow?</p>
+<p>A player who thinks one room at a time will always choose A, since 0.8 exceeds 0.6. That reasoning ignores what happens afterward. Door B leads to better rooms, so the choice with the worse immediate payoff may produce the better total. This is the structure of <em>sequential decision making</em>: the best action now depends on what will happen later. Agents meet it constantly. A web search costs time now and supplies information for later; a cheap model saves money now and may require an expensive correction later.</p>
+<h3 id="states-actions-and-transitions">2.1.2 States, Actions, and Transitions</h3>
+<p>We now make the game precise. At any moment the player is in some situation, which we call a <em>state</em>. In the door game a state might be “room 3, having chosen A then B.” We write <span class="math inline">\(s\)</span> for a state and <span class="math inline">\(S\)</span> for the set of all states.</p>
+<p>From each state the player may take one of several <em>actions</em>. In the door game the actions are “choose door A” and “choose door B.” We write <span class="math inline">\(a\)</span> for an action and <span class="math inline">\(A(s)\)</span> for the set of actions available in state <span class="math inline">\(s\)</span>.</p>
+<p>Taking an action moves the player to a new state, possibly at random. Door A leads to money with probability 0.8 and to nothing with probability 0.2. This is described by a <em>transition function</em> <span class="math inline">\(P(s&#39; \mid s, a)\)</span>, the probability of landing in state <span class="math inline">\(s&#39;\)</span> after taking action <span class="math inline">\(a\)</span> in state <span class="math inline">\(s\)</span>.</p>
+<p>Actions also produce <em>rewards</em>. Finding $100 behind a door is a reward. We write <span class="math inline">\(R(s, a, s&#39;)\)</span> for the reward obtained by taking action <span class="math inline">\(a\)</span> in state <span class="math inline">\(s\)</span> and landing in <span class="math inline">\(s&#39;\)</span>, and sometimes <span class="math inline">\(R(s, a)\)</span> for the expected reward, averaged over the possible next states.</p>
+<p>A <em>policy</em> is a rule for choosing actions. Formally, a policy <span class="math inline">\(\pi\)</span> maps states to actions, so that <span class="math inline">\(\pi(s) = a\)</span> means “in state <span class="math inline">\(s\)</span>, take action <span class="math inline">\(a\)</span>.” A policy may also be probabilistic, in which case <span class="math inline">\(\pi(a \mid s)\)</span> is the probability of taking <span class="math inline">\(a\)</span> in <span class="math inline">\(s\)</span>.</p>
+<h3 id="the-bellman-equation">2.1.3 The Bellman Equation</h3>
+<p>How good is a state? Define <span class="math inline">\(V^\pi(s)\)</span> to be the expected total reward obtained by starting in state <span class="math inline">\(s\)</span> and following policy <span class="math inline">\(\pi\)</span> from then on. This is the <em>value</em> of <span class="math inline">\(s\)</span> under <span class="math inline">\(\pi\)</span>.</p>
+<p>The idea behind the value function can be stated in one sentence: the value of a state is the immediate reward plus the value of wherever you land next. If you are in <span class="math inline">\(s\)</span>, take <span class="math inline">\(a\)</span>, receive <span class="math inline">\(r\)</span>, and land in <span class="math inline">\(s&#39;\)</span>, then your total reward is <span class="math inline">\(r\)</span> plus whatever you go on to accumulate from <span class="math inline">\(s&#39;\)</span>, and that future accumulation is exactly <span class="math inline">\(V^\pi(s&#39;)\)</span>. Written out, with the randomness averaged over, <span class="math display">\[V^\pi(s) = \sum_{a} \pi(a \mid s) \sum_{s&#39;} P(s&#39; \mid s,a) \left[ R(s,a,s&#39;) + \gamma V^\pi(s&#39;) \right].\]</span> The equation reads as follows. For each action <span class="math inline">\(a\)</span>, weighted by how often the policy takes it, and for each next state <span class="math inline">\(s&#39;\)</span>, weighted by how likely that transition is, add the immediate reward <span class="math inline">\(R(s,a,s&#39;)\)</span> to the discounted future value <span class="math inline">\(\gamma V^\pi(s&#39;)\)</span>.</p>
+<p>The quantity <span class="math inline">\(\gamma\)</span> is the <em>discount factor</em>, a number between 0 and 1 that expresses how much a reward tomorrow is worth relative to the same reward today. With <span class="math inline">\(\gamma = 0.9\)</span>, $100 tomorrow is worth $90 today. Discounting keeps infinite sums finite, and it captures a real preference for sooner over later.</p>
+<p>This is the <em>Bellman equation</em>, due to Richard Bellman in the 1950s. It is circular: the value is defined in terms of the value. The circularity is what makes it useful. Fix a policy and one can solve for the values; fix the values and one can improve the policy; alternate the two and the process converges to the best policy available. Nearly every method in Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a> is an inexpensive approximation to that loop, since an agent rarely has time to iterate to convergence.</p>
+<h3 id="example-the-two-door-game">2.1.4 Example: The Two-Door Game</h3>
+<p>We solve a reduced version of the game with two rooms. In room 1, door A yields $100 with probability 0.8 and door B yields $100 with probability 0.6; both lead to room 2. In room 2, each door yields $100 with probability 0.5, and the game ends. We take <span class="math inline">\(\gamma = 1\)</span>, so there is no discounting. Figure <a href="#fig:two-door">2.1</a> shows the two cases we compare.</p>
+<figure id="fig:two-door">
+<img src="figures/02-mathematical-foundations-fig1-349209a6cc.png" />
+<figcaption><strong>Figure 2.1.</strong> The two-door game. In Case 1 both doors lead to the same second room, and the door with the better immediate odds wins. In Case 2 door B leads to a room with better odds, and the door with the worse immediate payoff has the higher total value.</figcaption>
+</figure>
+<p>Suppose the policy always chooses A. From room 1 the expected reward is <span class="math inline">\(0.8 \times 100 = 80\)</span>, and the player lands in room 2. From room 2 the expected reward is <span class="math inline">\(0.5 \times 100 = 50\)</span>, and the game ends. The value of room 1 under this policy is therefore <span class="math inline">\(V(s_1) = 80 + 50 = 130\)</span>.</p>
+<p>Suppose instead the policy always chooses B. The expected reward from room 1 is <span class="math inline">\(0.6 \times 100 = 60\)</span>, and from room 2 it is again 50, so <span class="math inline">\(V(s_1) = 60 + 50 = 110\)</span>. Choosing A is better.</p>
+<p>Now change the game so that door B in room 1 leads to a different second room, in which each door yields $100 with probability 0.9. Choosing B now gives <span class="math inline">\(V(s_1) = 60 + 90 = 150\)</span>, while choosing A still gives <span class="math inline">\(130\)</span>. B is better despite its worse immediate odds. The future matters, and the value function is the device that accounts for it.</p>
+<h3 id="how-agents-use-this">2.1.5 How Agents Use This</h3>
+<p>An agent choosing among actions faces exactly this structure. Calling a large model costs more tokens and may finish the task in one step; calling a small model costs less and may require several attempts. The right choice depends on the consequences downstream.</p>
+<p>For an agent, the state includes the current context, the task, the remaining budget, and the information gathered so far. The actions are model calls, tool invocations, and retrieval operations. The rewards are task completion, and the costs, which enter as negative rewards, are token expenditures.</p>
+<p>In practice one rarely solves the Bellman equation exactly, because the state space is far too large. The framework still says what is being optimized and why myopic decisions fail, and the later chapters develop approximations that can be computed in the time an agent has.</p>
+<h2 id="constrained-optimization">2.2 Constrained Optimization</h2>
+<h3 id="the-puzzle-1">2.2.1 The Puzzle</h3>
+<p>You are packing for a hiking trip. Your pack holds 20 kg. You have ten candidate items, each with a weight and a usefulness: a tent (3 kg, usefulness 10), a sleeping bag (2 kg, usefulness 8), a stove (1 kg, usefulness 5), and so on. You want the most useful load that does not exceed 20 kg.</p>
+<p>The problem is easy to state and hard to solve. You cannot take everything, so you must choose, and the choices interact: taking the tent leaves less room for everything else.</p>
+<p>Agents face the same structure. There is a token budget. Each action consumes tokens and provides some value. The goal is the most value obtainable without exceeding the budget, and the mathematics is identical.</p>
+<h3 id="the-general-form">2.2.2 The General Form</h3>
+<p>An optimization problem has three parts: decision variables (what is chosen), an objective function (what is maximized or minimized), and constraints (limits on the choices). In symbols, <span class="math display">\[\begin{align*}
+\text{maximize} \quad &amp; f(x) \\
+\text{subject to} \quad &amp; g_i(x) \leq 0, \quad i = 1, \ldots, m,
+\end{align*}\]</span> where <span class="math inline">\(x\)</span> is the decision (a vector of choices), <span class="math inline">\(f(x)\)</span> is the objective (utility, reward, quality), and each <span class="math inline">\(g_i(x) \leq 0\)</span> is a constraint (a budget limit, a time limit, a capacity limit).</p>
+<p>For the packing problem, let <span class="math inline">\(x_i = 1\)</span> if item <span class="math inline">\(i\)</span> is taken and <span class="math inline">\(x_i = 0\)</span> otherwise, and let <span class="math inline">\(u_i\)</span> and <span class="math inline">\(w_i\)</span> be its usefulness and weight. Then the problem is <span class="math display">\[\begin{align*}
+\text{maximize} \quad &amp; \sum_i u_i x_i \\
+\text{subject to} \quad &amp; \sum_i w_i x_i \leq 20.
+\end{align*}\]</span> This is the <em>knapsack problem</em>. It is NP-hard in general, and good approximations exist.</p>
+<h3 id="lagrangian-relaxation">2.2.3 Lagrangian Relaxation</h3>
+<p>Constraints complicate optimization. Without the weight limit one would take everything; the limit forces trade-offs. <em>Lagrangian relaxation</em> is a systematic way to handle a constraint: it converts the constrained problem into an unconstrained one by attaching a price to violating the constraint.</p>
+<p>Suppose that exceeding the weight limit costs $5 per kilogram. The decision about the tent becomes a comparison: is its usefulness worth <span class="math inline">\(3 \times 5 = 15\)</span> in penalties? If so, take it; if not, leave it. Formally, introduce a <em>Lagrange multiplier</em> <span class="math inline">\(\lambda \geq 0\)</span> for each constraint and form the <em>Lagrangian</em> <span class="math display">\[L(x, \lambda) = f(x) - \lambda \cdot g(x).\]</span> When the constraint is violated (<span class="math inline">\(g(x) &gt; 0\)</span>), the second term is a penalty proportional to the violation; when it is satisfied (<span class="math inline">\(g(x) \leq 0\)</span>), the term is zero or a small bonus.</p>
+<p>The multiplier <span class="math inline">\(\lambda\)</span> is the <em>shadow price</em> of the constraint. It measures how much the objective would improve if the constraint were relaxed by one unit. If <span class="math inline">\(\lambda = 5\)</span> for the weight constraint, one additional kilogram of capacity would be worth 5 units of usefulness.</p>
+<h3 id="example-a-token-budget">2.2.4 Example: A Token Budget</h3>
+<p>An agent has a budget of 1<span>,</span>000 tokens and three possible actions. Action A costs 600 tokens and has expected value 10; action B costs 400 and has value 7; action C costs 300 and has value 5. With indicator variables <span class="math inline">\(x_A, x_B, x_C \in \{0,1\}\)</span>, the problem is <span class="math display">\[\begin{align*}
+\text{maximize} \quad &amp; 10 x_A + 7 x_B + 5 x_C \\
+\text{subject to} \quad &amp; 600 x_A + 400 x_B + 300 x_C \leq 1000.
+\end{align*}\]</span> There are few enough combinations to enumerate. A alone is feasible with value 10; B alone, value 7; C alone, value 5. A and B together cost exactly 1<span>,</span>000 and yield 17. A and C cost 900 and yield 15. B and C cost 700 and yield 12. All three cost 1<span>,</span>300 and are infeasible. The best feasible choice is A and B, with value 17.</p>
+<p>What is the shadow price here? Increasing the budget to 1<span>,</span>001 changes nothing, since C, the next item, still does not fit alongside A and B. Increasing it to 1<span>,</span>300 allows all three, for value 22. The shadow price therefore depends on how much <em>slack</em> exists between the budget and what is already committed. Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a> turns that slack into the central control signal.</p>
+<h3 id="value-density">2.2.5 Value Density</h3>
+<p>A useful heuristic for knapsack problems is <em>value density</em>, the value obtained per unit of cost. For the three actions above, A has density <span class="math inline">\(10/600 \approx 0.017\)</span> per token, B has <span class="math inline">\(7/400 \approx 0.018\)</span>, and C has <span class="math inline">\(5/300 \approx 0.017\)</span>. Figure <a href="#fig:knapsack">2.2</a> shows what happens when actions are packed in density order.</p>
+<figure id="fig:knapsack">
+<img src="figures/02-mathematical-foundations-fig2-d83992d700.png" />
+<figcaption><strong>Figure 2.2.</strong> Packing three actions into a 1<span>,</span>000-token budget. Greedy selection by value density takes B and then C, leaving a 300-token hole that A cannot use. The optimal packing takes A and B and fills the budget exactly.</figcaption>
+</figure>
+<p>B has the highest density, so a greedy algorithm takes B first (400 tokens), then C (300 more, total 700), and then finds that A needs 600 and only 300 remain. Greedy yields B and C, value 12. The optimum is A and B, value 17. Greedy loses because density ignores how items <em>pack</em>: B and C fit together and leave a hole too small for A. Even so, density supplies a useful ranking, and greedy selection is guaranteed to land within a bounded factor of the optimum.</p>
+<p>This is the trade that agents make. Rank candidate actions by expected value per token, take them in order until the budget is exhausted, and accept a small loss against an optimum that could not have been computed in time. Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a> builds on this ranking and then repairs its main weakness, which is that it spends the budget that should have been reserved for finishing.</p>
+<h2 id="probability-and-expectation">2.3 Probability and Expectation</h2>
+<h3 id="the-puzzle-2">2.3.1 The Puzzle</h3>
+<p>You flip a coin. Heads, you win $10; tails, you win nothing. What is the game worth?</p>
+<p>Most people answer $5. They compute the average: half the time $10, half the time $0, so $5 on average. This is the <em>expected value</em>, which collapses a distribution of outcomes into a single number.</p>
+<p>Now change the stakes. Heads, you win $1<span>,</span>000<span>,</span>000; tails, you lose $500<span>,</span>000. The expected value is <span class="math inline">\(0.5 \times 1{,}000{,}000 + 0.5 \times (-500{,}000) = \$250{,}000\)</span>. Would you play?</p>
+<p>Most people decline, and they are being sensible. An expectation of a quarter-million is of little use if one bad flip ends your ability to keep playing. Expectation describes the average over many plays; you get one.</p>
+<p>Agents live in the same regime. A speculative action with a high expected value can consume the entire budget on failure and leave nothing for the synthesis step that would have produced the answer. A conservative action returns less and costs what was predicted. Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a> turns this into thresholds that can be derived; the idea to carry forward is that variance, as much as the mean, decides whether an agent finishes.</p>
+<h3 id="random-variables-and-expectation">2.3.2 Random Variables and Expectation</h3>
+<p>A <em>random variable</em> <span class="math inline">\(X\)</span> is a quantity whose value depends on a random outcome. The result of the coin flip is a random variable that takes the value 10 with probability 0.5 and the value 0 with probability 0.5.</p>
+<p>The <em>expected value</em> (also called the <em>expectation</em> or <em>mean</em>) of <span class="math inline">\(X\)</span> is its probability-weighted average, <span class="math display">\[\mathbb{E}[X] = \sum_x x \cdot P(X = x).\]</span> For the coin flip, <span class="math inline">\(\mathbb{E}[X] = 10 \times 0.5 + 0 \times 0.5 = 5\)</span>. For continuous random variables the sum becomes an integral, and the intuition is unchanged.</p>
+<p>Expectation is linear: for random variables <span class="math inline">\(X\)</span> and <span class="math inline">\(Y\)</span> and constants <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span>, <span class="math display">\[\mathbb{E}[aX + bY] = a\,\mathbb{E}[X] + b\,\mathbb{E}[Y].\]</span> This holds whether or not <span class="math inline">\(X\)</span> and <span class="math inline">\(Y\)</span> are independent, which makes it a powerful tool for analyzing a complicated system by breaking it into parts.</p>
+<h3 id="variance-and-standard-deviation">2.3.3 Variance and Standard Deviation</h3>
+<p>Expectation locates the center of a distribution. <em>Variance</em> measures its spread: <span class="math display">\[\text{Var}(X) = \mathbb{E}\big[(X - \mathbb{E}[X])^2\big] = \mathbb{E}[X^2] - (\mathbb{E}[X])^2.\]</span> Variance is the expected squared distance from the mean. Its square root, the <em>standard deviation</em> <span class="math inline">\(\sigma = \sqrt{\text{Var}(X)}\)</span>, has the same units as <span class="math inline">\(X\)</span> and is easier to interpret.</p>
+<p>For the coin flip with outcomes 10 and 0, <span class="math display">\[\begin{align*}
+\mathbb{E}[X] &amp;= 5, \\
+\mathbb{E}[X^2] &amp;= 10^2 \times 0.5 + 0^2 \times 0.5 = 50, \\
+\text{Var}(X) &amp;= 50 - 25 = 25, \\
+\sigma &amp;= 5.
+\end{align*}\]</span> The standard deviation equals the mean, which is a high-variance game. A game that always pays $5 has the same mean and zero variance.</p>
+<h3 id="example-action-selection-under-uncertainty">2.3.4 Example: Action Selection Under Uncertainty</h3>
+<p>An agent chooses between two search strategies. Strategy A returns 3 relevant documents with probability 0.9 and 0 documents with probability 0.1. Strategy B always returns exactly 2 relevant documents.</p>
+<p>The expected number of documents from A is <span class="math inline">\(3 \times 0.9 + 0 \times 0.1 = 2.7\)</span>; from B it is <span class="math inline">\(2\)</span>. Strategy A has the higher expected value. It also has variance: <span class="math inline">\(\mathbb{E}[X^2] - (\mathbb{E}[X])^2 = (9 \times 0.9) - 2.7^2 = 8.1 - 7.29 = 0.81\)</span>, so its standard deviation is about <span class="math inline">\(0.9\)</span>. Strategy B has variance zero.</p>
+<p>Which is better depends on the consequences of the bad outcome. If the task fails outright when no documents are returned, B may be preferable despite its lower mean. If a failed search can simply be retried, A is better. The right choice depends on what variance costs, and that cost is a property of the surrounding system rather than of the two strategies.</p>
+<h3 id="conditional-probability-and-bayes-rule">2.3.5 Conditional Probability and Bayes’ Rule</h3>
+<p>New information changes probabilities. <em>Conditional probability</em> expresses this: <span class="math inline">\(P(A \mid B)\)</span> is the probability of <span class="math inline">\(A\)</span> given that <span class="math inline">\(B\)</span> has occurred, defined by <span class="math display">\[P(A \mid B) = \frac{P(A \cap B)}{P(B)}.\]</span> <em>Bayes’ rule</em> reverses the conditioning: <span class="math display">\[P(A \mid B) = \frac{P(B \mid A) \cdot P(A)}{P(B)}.\]</span> This is the basic tool for updating beliefs. One starts with a prior belief <span class="math inline">\(P(A)\)</span>, observes evidence <span class="math inline">\(B\)</span>, and moves to the posterior belief <span class="math inline">\(P(A \mid B)\)</span>.</p>
+<p>As an example, suppose an agent believes a fact is true with probability 0.7. It searches and finds a supporting document. Supporting documents appear for true facts 90% of the time and for false facts 30% of the time. Let <span class="math inline">\(T\)</span> denote “the fact is true” and <span class="math inline">\(D\)</span> denote “a supporting document was found,” so that <span class="math inline">\(P(T) = 0.7\)</span>, <span class="math inline">\(P(D \mid T) = 0.9\)</span>, and <span class="math inline">\(P(D \mid \neg T) = 0.3\)</span>.</p>
+<p>First compute the overall probability of finding a supporting document: <span class="math display">\[P(D) = P(D \mid T)P(T) + P(D \mid \neg T)P(\neg T) = 0.9 \times 0.7 + 0.3 \times 0.3 = 0.63 + 0.09 = 0.72.\]</span> Then apply Bayes’ rule: <span class="math display">\[P(T \mid D) = \frac{P(D \mid T) \cdot P(T)}{P(D)} = \frac{0.9 \times 0.7}{0.72} = \frac{0.63}{0.72} \approx 0.875.\]</span> The document raised the agent’s belief from 0.7 to 0.875. Agents update beliefs constantly, about which facts are true, which actions will succeed, and what the user wants, and Bayes’ rule is the principled way to incorporate each piece of evidence.</p>
+<h2 id="complexity-analysis">2.4 Complexity Analysis</h2>
+<h3 id="the-puzzle-3">2.4.1 The Puzzle</h3>
+<p>You have a list of one million names and must find “Zachary.” How long does this take?</p>
+<p>Checking each name from the beginning, you might examine all million in the worst case, and half a million on average. If the list is sorted alphabetically, you can use <em>binary search</em>: examine the middle name, decide whether “Zachary” comes before or after it, discard the half that cannot contain it, and repeat. After about 20 checks (<span class="math inline">\(\log_2 1{,}000{,}000 \approx 20\)</span>) you have either found Zachary or confirmed that he is absent.</p>
+<p>The difference between a million checks and twenty is the difference between an algorithm that finishes in seconds and one that takes hours. <em>Complexity analysis</em> makes this difference precise.</p>
+<h3 id="big-o-notation">2.4.2 Big-O Notation</h3>
+<p>Big-O notation describes how resource usage grows with the size of the input. <span class="math inline">\(O(n)\)</span> means the resource grows linearly: double the input and the resource doubles. Scanning an unsorted list of <span class="math inline">\(n\)</span> names is <span class="math inline">\(O(n)\)</span>. <span class="math inline">\(O(\log n)\)</span> means the resource grows logarithmically: double the input and the resource increases by a constant. Binary search is <span class="math inline">\(O(\log n)\)</span>. <span class="math inline">\(O(n^2)\)</span> means quadratic growth: double the input and the resource quadruples. Comparing every pair of items is <span class="math inline">\(O(n^2)\)</span>. <span class="math inline">\(O(1)\)</span> means the resource is constant regardless of input size; a hash-table lookup is usually <span class="math inline">\(O(1)\)</span>. Figure <a href="#fig:bigo">2.3</a> shows how far apart these growth rates are.</p>
+<figure id="fig:bigo">
+<img src="figures/02-mathematical-foundations-fig3-1248fcff0b.png" />
+<figcaption><strong>Figure 2.3.</strong> Growth rates compared. For an input of size 64, a constant-time operation costs 1, a logarithmic one costs 6, a linear one costs 64, and a quadratic one costs 4<span>,</span>096, which is off the top of the chart.</figcaption>
+</figure>
+<p>Formally, <span class="math inline">\(f(n) = O(g(n))\)</span> means that there exist constants <span class="math inline">\(c\)</span> and <span class="math inline">\(n_0\)</span> such that <span class="math inline">\(f(n) \leq c \cdot g(n)\)</span> for all <span class="math inline">\(n \geq n_0\)</span>. Big-O captures the growth rate and deliberately ignores constant factors.</p>
+<h3 id="time-and-space">2.4.3 Time and Space</h3>
+<p>Algorithms consume two resources: time (the number of operations) and space (the amount of memory). The two trade off. A hash table provides <span class="math inline">\(O(1)\)</span> average-time lookup and requires <span class="math inline">\(O(n)\)</span> space to hold <span class="math inline">\(n\)</span> items. A sorted list also requires <span class="math inline">\(O(n)\)</span> space, since it holds the same items, and its lookup takes <span class="math inline">\(O(\log n)\)</span> time. Using more space buys faster time; using less space costs slower time.</p>
+<p>Agents face this trade-off directly. Caching previous results uses memory and speeds up repeated queries. Storing the full conversation history uses space and makes retrieval possible.</p>
+<h3 id="amortized-complexity">2.4.4 Amortized Complexity</h3>
+<p>Some operations are expensive occasionally and cheap usually. <em>Amortized analysis</em> averages the cost over a sequence of operations.</p>
+<p>Consider a dynamic array that doubles in size when it fills. Most insertions take <span class="math inline">\(O(1)\)</span>, since they append to existing space. Occasionally an insertion triggers a doubling, which allocates a new array and copies every item, <span class="math inline">\(O(n)\)</span> work. Doubling is rare: after a doubling, <span class="math inline">\(n\)</span> further items can be inserted before the next one, so the <span class="math inline">\(O(n)\)</span> cost is spread across <span class="math inline">\(n\)</span> cheap insertions, and the amortized cost per insertion is <span class="math inline">\(O(1)\)</span>.</p>
+<p>This matters for agents because expensive maintenance is acceptable when it is rare enough. A memory compaction that takes 100 ms and runs every 1<span>,</span>000 operations has an amortized cost of 0.1 ms per operation.</p>
+<h3 id="example-retrieval-complexity">2.4.5 Example: Retrieval Complexity</h3>
+<p>An agent retrieves from a corpus of <span class="math inline">\(n\)</span> documents. There are three common approaches. A <em>brute-force search</em> compares the query to every document; its time is <span class="math inline">\(O(n)\)</span> and its space is <span class="math inline">\(O(n)\)</span> for the documents themselves. An <em>inverted index</em> stores, for each term, the list of documents containing it; a lookup retrieves the term’s list, so its time is <span class="math inline">\(O(k)\)</span> where <span class="math inline">\(k\)</span> is the number of matching documents, and its space is <span class="math inline">\(O(n \cdot L)\)</span> where <span class="math inline">\(L\)</span> is the average document length. A <em>vector index</em> such as HNSW (Hierarchical Navigable Small World, an approximate nearest-neighbour structure) builds a graph over document embeddings and navigates it; its search time is <span class="math inline">\(O(\log n)\)</span> on average and its space is <span class="math inline">\(O(n \cdot d)\)</span> where <span class="math inline">\(d\)</span> is the embedding dimension.</p>
+<p>For one million documents, brute force performs about 1<span>,</span>000<span>,</span>000 comparisons and HNSW performs about 20. Complexity analysis is what tells us in advance which of these designs will scale.</p>
+<h2 id="data-structures">2.5 Data Structures</h2>
+<h3 id="the-puzzle-4">2.5.1 The Puzzle</h3>
+<p>You run a library. Patrons return books and check out books, and you must track which books are available. How should the data be organized?</p>
+<p>One option is a list of available books. To check whether a book is available, scan the list; to check out, remove it from the list; to return, add it. A second option is a set of available books, implemented as a hash table. To check availability, perform a hash lookup; to check out, remove by key; to return, add by key.</p>
+<p>The list takes <span class="math inline">\(O(n)\)</span> time to check availability. The set takes <span class="math inline">\(O(1)\)</span>. For a library with 100<span>,</span>000 books and 1<span>,</span>000 checkouts a day, the difference is large. Data structures determine which operations are fast and which are slow, and choosing the right one is frequently the difference between a system that works and one that does not.</p>
+<h3 id="hash-tables">2.5.2 Hash Tables</h3>
+<p>A hash table stores key–value pairs with <span class="math inline">\(O(1)\)</span> average lookup, insertion, and deletion. The idea is to compute a <em>hash function</em> of the key, use the result as an index into an array, and store the value there. When two keys hash to the same index, a <em>collision</em>, the table handles it either by <em>chaining</em> (keeping a linked list at each index) or by <em>probing</em> (finding the next empty slot). The average cost of every operation is <span class="math inline">\(O(1)\)</span>; the worst case, when all keys collide, is <span class="math inline">\(O(n)\)</span>, and good hash functions make it very unlikely. Space is <span class="math inline">\(O(n)\)</span> for <span class="math inline">\(n\)</span> items.</p>
+<p>Agents use hash tables constantly: mapping message identifiers to content, caching query results, tracking documents already seen. Any fast lookup by key is a hash table.</p>
+<h3 id="trees">2.5.3 Trees</h3>
+<p>Trees organize data hierarchically, and balanced trees support <span class="math inline">\(O(\log n)\)</span> operations. In a <em>binary search tree</em>, each node holds a key, the left subtree holds smaller keys, and the right subtree holds larger keys; search, insertion, and deletion take <span class="math inline">\(O(\log n)\)</span> as long as the tree stays balanced. <em>B-trees</em> generalize this with many keys per node and are optimized for disk access, which is why databases use them. <em>Tries</em> are trees for strings, in which each edge represents a character; finding a string of length <span class="math inline">\(m\)</span> takes <span class="math inline">\(O(m)\)</span> regardless of how many strings are stored, which suits prefix matching and autocomplete.</p>
+<p>Agents use trees for hierarchical state, for range queries (find all items between <span class="math inline">\(X\)</span> and <span class="math inline">\(Y\)</span>), and for prefix searches (find all entities whose names begin with “New”).</p>
+<h3 id="bloom-filters">2.5.4 Bloom Filters</h3>
+<p>A <em>Bloom filter</em> answers the question “is <span class="math inline">\(x\)</span> in the set?” with one of two replies: “definitely not,” which is always correct, and “probably yes,” which is occasionally wrong. The structure is a bit array of <span class="math inline">\(m\)</span> bits, initially all zero, together with <span class="math inline">\(k\)</span> hash functions. To insert <span class="math inline">\(x\)</span>, compute its <span class="math inline">\(k\)</span> hashes and set those <span class="math inline">\(k\)</span> bits to one. To query <span class="math inline">\(x\)</span>, compute the same hashes and check whether all <span class="math inline">\(k\)</span> bits are one. If any bit is zero, <span class="math inline">\(x\)</span> was never inserted. If all are one, <span class="math inline">\(x\)</span> is probably present, although the bits may have been set by other items.</p>
+<p>The space is far smaller than storing the items themselves. With <span class="math inline">\(m = 10n\)</span> bits and <span class="math inline">\(k = 7\)</span> hash functions, the false-positive rate is about 1%. Agents use Bloom filters for “have I seen this document?” checks, for avoiding duplicate retrievals, and as a fast negative filter placed in front of an expensive operation.</p>
+<h3 id="graphs">2.5.5 Graphs</h3>
+<p>A <em>graph</em> represents relationships: nodes are entities and edges are connections between them. There are two standard representations. An <em>adjacency matrix</em> is an <span class="math inline">\(n \times n\)</span> array whose <span class="math inline">\((i,j)\)</span> entry records whether there is an edge from <span class="math inline">\(i\)</span> to <span class="math inline">\(j\)</span>; it uses <span class="math inline">\(O(n^2)\)</span> space and answers edge queries in <span class="math inline">\(O(1)\)</span>. An <em>adjacency list</em> stores, for each node, the list of its neighbors; it uses <span class="math inline">\(O(n + e)\)</span> space for <span class="math inline">\(e\)</span> edges and answers edge queries in time proportional to the node’s degree.</p>
+<p>Three graph algorithms recur in this book. <em>Breadth-first</em> and <em>depth-first search</em> visit every reachable node in <span class="math inline">\(O(n + e)\)</span> time. <em>Shortest-path</em> algorithms such as Dijkstra’s find a minimum-cost path in <span class="math inline">\(O((n + e) \log n)\)</span>. <em>Topological sort</em> orders nodes so that every edge points forward, in <span class="math inline">\(O(n + e)\)</span>, which is how one schedules tasks that depend on one another.</p>
+<p>Agents use graphs to represent dependencies among actions, to plan an execution order, and to model relationships among entities.</p>
+<h2 id="putting-it-together">2.6 Putting It Together</h2>
+<p>The five tools recur throughout the book, each in a specific role.</p>
+<p>When we analyze action selection under a budget, we use constrained optimization. The budget is the constraint, the task value is the objective, and Lagrangian relaxation supplies a shadow price for tokens. When we model an agent’s behavior over time, we use the Markov decision process: states capture context and progress, actions are model calls and tool uses, rewards are task completions less costs, and the Bellman equation guides policy improvement. When we analyze retrieval and memory systems, we use complexity analysis to ask which index structure scales, what the time–space trade-offs are, and how latency grows with corpus size. When we reason about uncertainty, we use probability to ask what an action’s expected cost is, what its variance is, and how beliefs should change given evidence. When we implement any of this, we choose data structures: hash tables for lookup, trees for ordered access, Bloom filters for membership.</p>
+<p>Later chapters restate whatever they need at the point of use, so nothing here has to be memorized. What is worth carrying forward is a habit. When an agent behaves strangely, ask which of the five tools is missing. Runaway spending usually indicates a missing constraint. Oscillation usually indicates a missing discount. Confident nonsense usually indicates a missing variance term.</p>
+<h2 id="summary">2.7 Summary</h2>
+<p>Five tools, and the reason each is here:</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Tool</th>
+<th style="text-align: left;">Answers</th>
+<th style="text-align: left;">Used in</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">MDPs / Bellman</td>
+<td style="text-align: left;">What should I do next, given the future?</td>
+<td style="text-align: left;">Ch. <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a>, <a href="08-speculation-parallelism-and-commit-protocols.html#ch:speculation">8</a></td>
+</tr>
+<tr>
+<td style="text-align: left;">Constrained optimization</td>
+<td style="text-align: left;">How do I maximize value under a cap?</td>
+<td style="text-align: left;">Ch. <a href="05-cost-models-and-critical-paths.html#ch:cost">5</a>–<a href="07-action-selection-under-budgets.html#ch:action-selection">7</a></td>
+</tr>
+<tr>
+<td style="text-align: left;">Probability / expectation</td>
+<td style="text-align: left;">How confident am I, and how risky is this?</td>
+<td style="text-align: left;">Ch. <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a></td>
+</tr>
+<tr>
+<td style="text-align: left;">Complexity analysis</td>
+<td style="text-align: left;">Will this still work at <span class="math inline">\(100\times\)</span> the data?</td>
+<td style="text-align: left;">Ch. <a href="10-memory-state-and-forgetting.html#ch:memory">10</a>, <a href="11-retrieval-and-evidence-management.html#ch:retrieval">11</a></td>
+</tr>
+<tr>
+<td style="text-align: left;">Data structures</td>
+<td style="text-align: left;">Is this implementable at all?</td>
+<td style="text-align: left;">Ch. <a href="10-memory-state-and-forgetting.html#ch:memory">10</a>, <a href="11-retrieval-and-evidence-management.html#ch:retrieval">11</a></td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The recurring theme is coupling. A budget makes today’s decision depend on tomorrow’s feasibility, which is why greedy selection fails and why the reservation term <span class="math inline">\(R_t\)</span> exists. Everything else in this chapter is machinery for reasoning about that coupling.</p>
+<h2 id="common-misunderstandings">2.8 Common Misunderstandings</h2>
+<p><em>Expected value is the whole story.</em> It is the right summary when there are many independent draws. An agent with one budget and one attempt at a task is in a different regime, and optimizing expectation alone will accept a policy that succeeds brilliantly 70% of the time and produces an unrecoverable mess the other 30%. The variance has to enter the decision.</p>
+<p><em>The discount factor is a modeling detail.</em> The value of <span class="math inline">\(\gamma\)</span> encodes how much the system prefers finishing now to finishing later. Set it near 1 and a long-horizon agent will explore indefinitely, because the payoff always appears reachable. Set it too low and the agent will decline a retrieval step that would have answered the question. It is a design parameter with visible consequences.</p>
+<p><em>Big-O settles the design.</em> Constant factors decide agent architectures. An <span class="math inline">\(O(\log n)\)</span> index behind a 40 ms network round trip loses to an <span class="math inline">\(O(n)\)</span> scan over a list already in memory, for every <span class="math inline">\(n\)</span> one is likely to see. Asymptotic analysis says what will scale; measurement says what is fast today.</p>
+<p><em>The Lagrange multiplier can be computed once.</em> The multiplier is the shadow price of the budget, and the budget changes at every step. A multiplier fitted offline is correct at one point of a trajectory that does not remain there. It must be re-estimated as the run proceeds.</p>
+<p><em>A false positive and a false negative are one error rate.</em> Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a> derives thresholds from asymmetric costs. Averaging the two error types into a single “accuracy” discards exactly the information the threshold requires.</p>
+<h2 class="unnumbered" id="exercises">Exercises</h2>
+<ol>
+<li><p>In the two-door game, find the value of <span class="math inline">\(\gamma\)</span> at which door B becomes preferable to door A on the first move. Explain what that threshold means for an agent deciding whether to run a slow, high-quality retrieval.</p></li>
+<li><p>An agent has a 10<span>,</span>000-token budget and four candidate actions with (expected value, cost) of <span class="math inline">\((9, 3000)\)</span>, <span class="math inline">\((7, 4000)\)</span>, <span class="math inline">\((5, 2500)\)</span>, and <span class="math inline">\((4, 1500)\)</span>. Compute the greedy-by-density solution and the optimal solution. What is the gap, and what property of the costs produced it?</p></li>
+<li><p>Show that if verification costs <span class="math inline">\(c_v\)</span> and catches a fraction <span class="math inline">\(q\)</span> of errors, each costing <span class="math inline">\(c_e\)</span>, then verification is worth running exactly when <span class="math inline">\(c_v &lt; q \cdot c_e\)</span>. Then explain why a noisy verifier that sometimes damages correct outputs breaks this inequality, and what term you would add.</p></li>
+<li><p>A retrieval index answers in <span class="math inline">\(O(\log n)\)</span> with a 40 ms constant; a linear scan answers in <span class="math inline">\(O(n)\)</span> at 5 ns per item. Find the <span class="math inline">\(n\)</span> at which the index wins. Comment on whether your corpus is anywhere near it.</p></li>
+<li><p>An agent’s per-step cost is believed to be Gaussian with mean 800 tokens and standard deviation 300. It has 5<span>,</span>000 tokens left and must reserve enough to finish in 4 more steps with 95% probability. How much can it spend now? Redo the calculation with standard deviation 900 and comment on the difference.</p></li>
+</ol>
+<h2 class="unnumbered" id="bibliographic-notes">Bibliographic Notes</h2>
+<p>Markov decision processes are covered in Puterman [<a href="#ref-puterman1994markov">1</a>]. Sutton and Barto [<a href="#ref-sutton2018reinforcement">2</a>] provide an accessible introduction oriented toward reinforcement learning.</p>
+<p>Constrained optimization is treated in Boyd and Vandenberghe [<a href="#ref-boyd2004convex">3</a>]. The treatment of Lagrange multipliers follows Bertsekas [<a href="#ref-bertsekas1999nonlinear">4</a>].</p>
+<p>Probability foundations appear in any undergraduate text; Ross [<a href="#ref-ross2014first">5</a>] is widely used. Bayesian reasoning is developed in Gelman et al. [<a href="#ref-gelman2013bayesian">6</a>].</p>
+<p>Complexity analysis is covered in Cormen et al. [<a href="#ref-cormen2009introduction">7</a>], the standard algorithms textbook. Amortized analysis originates with Tarjan [<a href="#ref-tarjan1985amortized">8</a>].</p>
+<p>Data structures are treated comprehensively in Cormen et al. [<a href="#ref-cormen2009introduction">7</a>]. Bloom filters were introduced by Bloom [<a href="#ref-bloom1970space">9</a>]. HNSW for approximate nearest neighbor search is described in Malkov and Yashunin [<a href="#ref-malkov2018efficient">10</a>].</p>
+<h2 class="unnumbered" id="bibliography">Bibliography</h2>
+<ol>
+<li><div id="ref-puterman1994markov">
+
+</div>
+<p>M. L. Puterman. <em>Markov Decision Processes. Discrete Stochastic Dynamic Programming</em>. Wiley, 1994.</p></li>
+<li><div id="ref-sutton2018reinforcement">
+
+</div>
+<p>R. S. Sutton and A. G. Barto. <em>Reinforcement Learning. An Introduction</em>. MIT Press, 2nd edition, 2018.</p></li>
+<li><div id="ref-boyd2004convex">
+
+</div>
+<p>S. Boyd and L. Vandenberghe. <em>Convex Optimization</em>. Cambridge University Press, 2004.</p></li>
+<li><div id="ref-bertsekas1999nonlinear">
+
+</div>
+<p>D. P. Bertsekas. <em>Nonlinear Programming</em>. Athena Scientific, 2nd edition, 1999.</p></li>
+<li><div id="ref-ross2014first">
+
+</div>
+<p>S. Ross. <em>A First Course in Probability</em>. Pearson, 9th edition, 2014.</p></li>
+<li><div id="ref-gelman2013bayesian">
+
+</div>
+<p>A. Gelman, J. B. Carlin, H. S. Stern, D. B. Dunson, A. Vehtari, and D. B. Rubin. <em>Bayesian Data Analysis</em>. CRC Press, 3rd edition, 2013.</p></li>
+<li><div id="ref-cormen2009introduction">
+
+</div>
+<p>T. H. Cormen, C. E. Leiserson, R. L. Rivest, and C. Stein. <em>Introduction to Algorithms</em>. MIT Press, 3rd edition, 2009.</p></li>
+<li><div id="ref-tarjan1985amortized">
+
+</div>
+<p>R. E. Tarjan. Amortized computational complexity. <em>SIAM Journal on Algebraic and Discrete Methods</em>, 6(2):306–318, 1985.</p></li>
+<li><div id="ref-bloom1970space">
+
+</div>
+<p>B. H. Bloom. Space/time trade-offs in hash coding with allowable errors. <em>Communications of the ACM</em>, 13(7):422–426, 1970.</p></li>
+<li><div id="ref-malkov2018efficient">
+
+</div>
+<p>Y. A. Malkov and D. A. Yashunin. Efficient and robust approximate nearest neighbor search using hierarchical navigable small world graphs. <em>IEEE Transactions on Pattern Analysis and Machine Intelligence</em>, 42(4):824–836, 2018.</p></li>
+</ol>
+
+<div id="bottom"><a href="01-terms-and-operational-definitions.html" rel="prev">&laquo; Terms and Operational Definitions</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="03-a-short-history-of-agents-control-and-commitment.html" rel="next">A Short History of Agents, Control, and Commitment &raquo;</a><br>&copy; 2026 Madhava Gaikwad. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
+</div>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</body>
+</html>

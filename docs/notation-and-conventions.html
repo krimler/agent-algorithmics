@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notation and Conventions — Agent Algorithmics</title>
+<meta name="description" content="You can skip this chapter and come back when a symbol surprises you. It is here so that when Chapter 9 writes \(B_t - R_t\) without comment, you know what…">
+<meta name="author" content="Madhava Gaikwad">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="book">
+<meta property="og:title" content="Notation and Conventions — Agent Algorithmics">
+<meta property="og:description" content="You can skip this chapter and come back when a symbol surprises you. It is here so that when Chapter 9 writes \(B_t - R_t\) without comment, you know what…">
+<meta property="og:url" content="https://krimler.github.io/agent-algorithmics/notation-and-conventions.html">
+<link rel="canonical" href="https://krimler.github.io/agent-algorithmics/notation-and-conventions.html">
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Notation and Conventions", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 0, "url": "https://krimler.github.io/agent-algorithmics/notation-and-conventions.html"}</script>
+
+</head>
+<body>
+<div id="page">
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="preface.html" rel="prev">&laquo; Preface</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="01-terms-and-operational-definitions.html" rel="next">Terms and Operational Definitions &raquo;</a></div>
+<h1>Notation and Conventions</h1><p>You can skip this chapter and come back when a symbol surprises you. It is here so that when Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a> writes <span class="math inline">\(B_t - R_t\)</span> without comment, you know what both terms mean and why the subtraction matters.</p>
+<h2 class="unnumbered" id="time-and-execution">Time and Execution</h2>
+<p>Time is discrete, indexed <span class="math inline">\(t = 1, 2, \ldots\)</span>. An agent runs in steps, and at each step it observes, decides, and possibly acts. Wall-clock time appears separately when latency is the subject; until then, a “step” is one turn through that loop.</p>
+<h2 class="unnumbered" id="state-observation-and-history">State, Observation, and History</h2>
+<ul>
+<li><p><span class="math inline">\(S_t\)</span> denotes the environment state at time <span class="math inline">\(t\)</span>, which the agent generally cannot see.</p></li>
+<li><p><span class="math inline">\(o_t\)</span> denotes what the agent actually observes at time <span class="math inline">\(t\)</span>.</p></li>
+<li><p><span class="math inline">\(H_t = (o_1, a_1, \ldots, o_t)\)</span> denotes the execution history through time <span class="math inline">\(t\)</span>.</p></li>
+</ul>
+<p>The distinction between <span class="math inline">\(S_t\)</span> and <span class="math inline">\(o_t\)</span> does real work in this book. Agents act on <span class="math inline">\(H_t\)</span>, a lossy and often stale record, while consequences land on <span class="math inline">\(S_t\)</span>.</p>
+<h2 class="unnumbered" id="actions-and-policies">Actions and Policies</h2>
+<ul>
+<li><p><span class="math inline">\(a_t \in \mathcal{A}\)</span> denotes the action taken at time <span class="math inline">\(t\)</span>.</p></li>
+<li><p><span class="math inline">\(\pi(\cdot \mid H_t)\)</span> denotes the policy, mapping histories to actions.</p></li>
+</ul>
+<p>Policies may be deterministic or stochastic, and may carry internal state of their own (a budget tracker, a memory index, a set of open commitments).</p>
+<h2 class="unnumbered" id="cost-and-budgets">Cost and Budgets</h2>
+<ul>
+<li><p><span class="math inline">\(c(e_t)\)</span> denotes cost of event <span class="math inline">\(e_t\)</span>.</p></li>
+<li><p><span class="math inline">\(C(\tau)\)</span> denotes total cost accumulated over a trace <span class="math inline">\(\tau\)</span>.</p></li>
+<li><p><span class="math inline">\(B_t\)</span> denotes budget remaining at time <span class="math inline">\(t\)</span>.</p></li>
+<li><p><span class="math inline">\(R_t\)</span> denotes budget <em>reserved</em> for work the agent has not done yet but must.</p></li>
+<li><p><span class="math inline">\(\hat{R}_t\)</span> denotes the <em>estimated</em> cost of completing the task from the current state. It is an estimate, so it carries a distribution rather than a single number.</p></li>
+<li><p><span class="math inline">\(\Delta_t = B_t - \hat{R}_t\)</span> denotes <em>slack</em>, the budget available after setting aside what finishing is expected to cost.</p></li>
+</ul>
+<p>Cost covers tokens, latency, external resource consumption, and the expected cost of failure. Budgets are hard constraints unless a passage says otherwise. <span class="math inline">\(R_t\)</span> is the term that separates an agent which finishes from one that runs out of money three steps from the answer.</p>
+<h2 class="unnumbered" id="traces">Traces</h2>
+<p>A trace <span class="math inline">\(\tau = \langle e_1, \ldots, e_T \rangle\)</span> is the sequence of execution events, namely observations, decisions, actions, gate outcomes, commits, and aborts.</p>
+<p>Correctness, cost, and alignment are properties of traces. A single output can look impeccable in a trace that violated an invariant four steps earlier, which is why Chapter <a href="14-trace-semantics-and-agent-telemetry.html#ch:traces">14</a> treats the trace as the unit of evaluation.</p>
+<h2 class="unnumbered" id="gates-and-control-decisions">Gates and Control Decisions</h2>
+<p>A <em>gate</em> is a control decision applied before commitment. Its outcomes are <span class="math display">\[\{\textsc{Execute}, \textsc{Verify}, \textsc{Abstain}, \textsc{Refuse}\}.\]</span></p>
+<p>Gates read risk estimates, budgets, policies, and evidence. Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a> derives the thresholds rather than asserting them.</p>
+<h2 class="unnumbered" id="speculation-and-commitment">Speculation and Commitment</h2>
+<ul>
+<li><p><em>Speculation</em> denotes tentative execution whose results may be thrown away.</p></li>
+<li><p><em>Commitment</em> denotes the moment results become irreversible and externally visible.</p></li>
+</ul>
+<p>Speculative work is assumed abortable. Chapter <a href="08-speculation-parallelism-and-commit-protocols.html#ch:speculation">8</a> spends considerable effort on how often that assumption is false in practice, including the case where an aborted branch still influences the model through retained cache state.</p>
+<h2 class="unnumbered" id="invariants-and-policies">Invariants and Policies</h2>
+<ul>
+<li><p>An <em>invariant</em> must hold at every step of execution.</p></li>
+<li><p>A <em>policy</em> is a predicate constraining which actions are admissible.</p></li>
+</ul>
+<p>Breaking an invariant counts as system failure even when the task succeeded. A system that refunds the right customer by writing directly to the ledger has still failed.</p>
+<h2 class="unnumbered" id="conventions">Conventions</h2>
+<ul>
+<li><p>Boldface marks defined terms on first use, and little else.</p></li>
+<li><p>Probabilities and expectations condition on the agent’s available information unless stated otherwise.</p></li>
+<li><p>Dollar figures and per-token prices are illustrative. Absolute prices move fast; the <em>ratios</em> between model tiers have been stable for years, and the arguments in this book depend only on the ratios.</p></li>
+<li><p>Examples are illustrative rather than exhaustive.</p></li>
+</ul>
+
+<div id="bottom"><a href="preface.html" rel="prev">&laquo; Preface</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="01-terms-and-operational-definitions.html" rel="next">Terms and Operational Definitions &raquo;</a><br>&copy; 2026 Madhava Gaikwad. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
+</div>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</body>
+</html>

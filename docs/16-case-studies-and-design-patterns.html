@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 16: Case Studies and Design Patterns — Agent Algorithmics</title>
+<meta name="description" content="Fourteen chapters of machinery raise the question a reader building something next week actually has: which parts are needed for this system?">
+<meta name="author" content="Madhava Gaikwad">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="book">
+<meta property="og:title" content="Chapter 16: Case Studies and Design Patterns — Agent Algorithmics">
+<meta property="og:description" content="Fourteen chapters of machinery raise the question a reader building something next week actually has: which parts are needed for this system?">
+<meta property="og:url" content="https://krimler.github.io/agent-algorithmics/16-case-studies-and-design-patterns.html">
+<link rel="canonical" href="https://krimler.github.io/agent-algorithmics/16-case-studies-and-design-patterns.html">
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Case Studies and Design Patterns", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 16, "url": "https://krimler.github.io/agent-algorithmics/16-case-studies-and-design-patterns.html"}</script>
+
+</head>
+<body>
+<div id="page">
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="15-evaluation-stability-cost-and-behavioral-fidelity.html" rel="prev">&laquo; Evaluation: Stability, Cost, and Behavioral Fidelity</a> &nbsp;|&nbsp; <a href="index.html">Contents</a></div>
+<h1 id="ch:patterns"><span class="part">Part IV: Synthesis</span>Chapter 16. Case Studies and Design Patterns</h1><p>Fourteen chapters of machinery raise the question a reader building something next week actually has: which parts are needed for this system?</p>
+<p>This chapter answers with patterns and case studies. The patterns are reusable, and each comes with the conditions under which it stops working. The case studies are complete designs, worth reading less for their architectures than for the interactions: the places where two individually sensible components combine into something that violates a constraint neither of them knew about. The patterns and case studies draw on production systems deployed in 2025, including deep research agents, software engineering agents, and enterprise assistants, and cite specific architectures and their measured performance where possible.</p>
+<p>One theme runs through all of it: <em>constraint-aware composition</em>. Agents seldom fail because a component is weak. They fail at the seams. A retrieval step that is individually excellent consumes the budget that synthesis needed; a compaction pass that is individually correct removes a policy the gate assumed was present; two agents that each hold a valid lock deadlock on a shared file. The best architecture is almost always the simplest one that satisfies its constraints with margin, and margin is the operative word: a design that exactly meets its budget under median load has no answer for the 95th-percentile run.</p>
+<h2 id="design-patterns">16.1 Design Patterns</h2>
+<p>Design patterns capture recurring solutions to common design problems. We organize them into three groups: reasoning patterns that structure how an agent thinks, orchestration patterns that organize several agents, and operational patterns that address production concerns. A pattern is valuable only when it makes three things explicit: its <em>interfaces</em> (what crosses component boundaries: plans, tool results, artifacts, policies), its <em>failure semantics</em> (what happens when a substep fails: retry, degrade, escalate, abort), and its <em>resource envelope</em> (token, time, and cost budgets, and how they are enforced). Without these, a pattern is a slogan.</p>
+<h3 id="reasoning-patterns">16.1.1 Reasoning Patterns</h3>
+<h4 id="react-reasoning-and-acting">ReAct: Reasoning and Acting</h4>
+<p>The ReAct pattern [<a href="#ref-react2022">10</a>] interleaves reasoning traces with actions, so that the agent adapts as observations arrive. Figure <a href="#fig:react">16.1</a> shows the loop.</p>
+<figure id="fig:react">
+<img src="figures/16-case-studies-and-design-patterns-fig1-64db0d74a0.png" />
+<figcaption><strong>Figure 16.1.</strong> ReAct as a controlled loop. The thought is a planning scratchpad; the action is drawn from a finite typed tool set and passes a policy gate; the observation is normalized before it enters the state. The loop terminates on goal, on diminishing returns, or on budget.</figcaption>
+</figure>
+<p>ReAct’s strength is integration. Reasoning traces help the model stay coherent, while actions let it consult external resources on the basis of those thoughts. On knowledge-intensive tasks such as HotpotQA, ReAct agents avoid hallucination by using reasoning steps to decide when to search for evidence [<a href="#ref-react2022">10</a>]. In production, ReAct amounts to enforcing a <em>state machine</em>: the state is the evolving task context (goal, constraints, partial results, remaining budget); the action is constrained to a finite tool set with typed inputs and outputs; and the observation is normalized into a compact, stable schema so the model can condition on it reliably. The thought is often an internal planning scratchpad stored for debugging rather than shown to users.</p>
+<p>ReAct suits tasks requiring adaptive multi-step reasoning with tool use, where the next step depends on previous results. It is a poor fit for single-step tasks where the overhead is unjustified and for highly structured workflows where the sequence is predetermined. Implementation considerations: tie the iteration limit to the budget, so that “max steps” is derived from remaining cost; design clear stopping conditions (goal achieved, sufficient evidence, diminishing returns); represent tool results as <code>(status, key_fields, pointers)</code> rather than raw blobs; and instrument each iteration as a trace span (Chapter <a href="14-trace-semantics-and-agent-telemetry.html#ch:traces">14</a>) with the tool name and the remaining budget. The standard hardening is <em>ReAct with guardrails</em>: validate that each proposed action satisfies policy (allowed tools, scopes, rate limits) before the call, and validate that each observation is well formed and free of injection after it, which turns the flexible loop into a controlled decision process.</p>
+<h4 id="plan-then-execute">Plan-then-Execute</h4>
+<p>The Plan-then-Execute pattern separates planning from execution, producing a complete plan before any action:</p>
+<pre><code>plan = planner.create_plan(task)
+for step in plan:
+    result = executor.execute(step)
+    if failure:
+        plan = planner.replan(task, completed_steps, failure)</code></pre>
+<p>The pattern gives visibility into the agent’s intentions before commitment, so users can review and modify plans, and it allows a more capable model for planning and a cheaper one for execution. A plan should be <em>tool-shaped</em>: typed steps that name a tool, its arguments, and expected output fields; preconditions that must hold before a step; postconditions that verify a step succeeded; and rollback semantics for undesired side effects. A plan that reads as prose is difficult to execute reliably. In enterprise settings the plan becomes part of the audit trail, a structured record of intent that can be compared to what happened.</p>
+<p>The pattern suits complex multi-step tasks where upfront planning improves efficiency, workflows requiring human approval before execution, and tasks where replanning is expensive. It suits dynamic environments poorly, since plans go stale, and simple tasks poorly, since planning overhead exceeds the benefit. Compared with ReAct, it is more predictable and auditable and less adaptive, and many systems hybridize: create an initial plan, execute with ReAct-style adaptation, and replan on significant deviation. A useful hybrid is <em>bounded deviation</em>: allow execution-time micro-decisions such as rerunning a search with a refined query, and require replanning when the agent wants to add a new tool category, exceed the budget, or change objectives.</p>
+<h4 id="reflection">Reflection</h4>
+<p>The Reflection pattern has the agent critique and improve its own output through iteration [<a href="#ref-reflexion2023">11</a>]:</p>
+<pre><code>loop:
+    output = generator.generate(task, context)
+    critique = reflector.evaluate(output, criteria)
+    if critique.satisfactory or max_iterations:
+        return output
+    context = context + critique.feedback</code></pre>
+<p>Reflection trades compute for quality. The danger in deployment is <em>unproductive reflection</em>, cycles that rewrite for style without fixing correctness, and productive reflection requires externally checkable signals: tests and linters for code, citation verification for research, policy validation for enterprise actions, deterministic heuristics such as schema checks. Without such signals, reflection converges on confident, wrong answers. Variants differ in who critiques: the same model (simple, may reinforce errors), a separate critic (more diverse, more expensive), grounded reflection that references external data [<a href="#ref-reflexion2023">11</a>], and multi-agent reflection with several critics that debate [<a href="#ref-mar2025">6</a>], which addresses the “degeneration of thought” in which a single critic repeats the same flawed reasoning. Reflection suits knowledge-intensive tasks where quality outweighs speed and errors are likely, and it needs a budget-aware stopping rule: stop when the critique proposes no material change, when external checks pass, when marginal improvement plateaus, or when the remaining budget falls below a safe threshold.</p>
+<h4 id="tree-search">Tree Search</h4>
+<p>Tree-search patterns explore several solution paths and select the most promising. Tree of Thoughts generates several reasoning branches at each step and prunes. Language Agent Tree Search (LATS) [<a href="#ref-lats2023">5</a>] combines reflection, evaluation, and Monte Carlo tree search, exploring branches, receiving feedback, backtracking from dead ends, and concentrating search on promising directions. Tree search suits problems with many approaches where backtracking is valuable (competitive coding, puzzles, strategic planning) and suits simple tasks and cost-sensitive applications poorly, since it multiplies model calls. In systems terms it is an explicit compute-for-reliability trade whose success depends on the evaluator: weak evaluation explores confidently wrong branches, and expensive evaluation dominates cost. A common production compromise is <em>shallow branching</em>: generate three to five candidates once, score them with a judge or heuristic, and execute only the best with a normal loop, which captures much of the benefit without full search overhead.</p>
+<h3 id="orchestration-patterns">16.1.2 Orchestration Patterns</h3>
+<p>As systems grow beyond one agent, orchestration patterns organize collaboration [<a href="#ref-msagentpatterns2025">7</a>]. Dividing work is the visible half of orchestration; the half that determines whether the system survives production is enforcement: separation of concerns (different prompts, tools, and policies per role), isolation (a failure in one role does not corrupt global state), and aggregation (merging partial results without losing provenance). Figure <a href="#fig:orchestration">16.2</a> shows the four shapes.</p>
+<figure id="fig:orchestration">
+<img src="figures/16-case-studies-and-design-patterns-fig2-a412ded5d3.png" />
+<figcaption><strong>Figure 16.2.</strong> Four orchestration shapes. A pipeline passes a structured artifact between fixed stages. A coordinator decomposes and aggregates. A handoff network transfers control directly, and needs a bound on the number of transfers. A group chat needs a manager who chooses the speaker and decides when the discussion is over.</figcaption>
+</figure>
+<h4 id="sequential-pipeline">Sequential Pipeline</h4>
+<p>Agents execute in a fixed order, each consuming the output of the previous one. This is the simplest multi-agent pattern: predictable, easy to debug, with clear data flow and focused responsibility per agent. It suits well-defined workflows with distinct stages and suits dynamic routing or bidirectional communication poorly. A pipeline becomes robust when each stage emits a structured artifact (a well-defined schema), a minimal summary for human comprehension, and a validation report (schema checks, invariants, quality signals), which enables stage-level retries and rerunning only the failed stage.</p>
+<h4 id="coordinatorworker">Coordinator–Worker</h4>
+<p>A coordinator receives a task, decomposes it, delegates to specialist workers, and aggregates their results [<a href="#ref-googleadk2025">4</a>]. The coordinator holds global state and makes routing decisions; workers focus on domain expertise. The pattern suits complex customer service (billing against technical support), enterprise assistants spanning domains, and research requiring diverse expertise. The coordinator may be model-based (flexible routing) or rule-based (deterministic); worker descriptions serve as the coordinator’s documentation of what each can do and should be precise; and whether workers need each other’s outputs is a design decision. The pattern fails most often through <em>aggregation errors</em>: the coordinator over-trusts a worker, merges inconsistent claims, or drops caveats. Two mitigations are common: provenance-first aggregation, in which every claim carries a pointer to evidence or to the worker span that produced it, and explicit conflict handling, in which disagreement between workers is resolved with further evidence or presented transparently.</p>
+<h4 id="adaptive-agent-network-handoff">Adaptive Agent Network (Handoff)</h4>
+<p>Agents transfer control directly to one another according to expertise, without central coordination: agent A recognizes a billing question and hands to B, who resolves it and hands a technical follow-up to C. Each agent may execute, delegate, or enrich the task before passing it on, which enables fluid conversational experiences and real-time applications where a supervisor’s latency is unacceptable. The pattern suits low-latency, dynamically routed, conversational systems and suits workflows requiring central oversight, strict sequential dependencies, or clear task ownership poorly. A handoff network needs a <em>handoff contract</em>: what minimal context is transferred (customer identifier, intent, constraints), what is explicitly withheld (personal data beyond need), how responsibility transfers, and how ping-pong loops are prevented. Without a contract the network becomes an unbounded routing loop, and the standard fix is a <em>handoff TTL</em> that limits the number of transfers or requires supervisor intervention after <span class="math inline">\(N\)</span>.</p>
+<h4 id="parallel-collaboration">Parallel Collaboration</h4>
+<p>Several agents work on the same task at once, and the results are aggregated or selected. This reduces latency for independent subtasks and provides several perspectives on ambiguous problems, and ensembles can improve reliability through voting or consensus. It suits tasks benefiting from multiple perspectives, time-sensitive scenarios, and quality-critical tasks, and suits sequential dependencies, resource-constrained environments, and conflicting results without a resolution rule poorly. It needs an aggregation policy: select-best by judge score (simplest, dependent on judge reliability), vote for discrete decisions, or merge complementary parts, which is the most powerful and the easiest way to introduce contradictions unless the merge is structured.</p>
+<h4 id="group-chat">Group Chat</h4>
+<p>Several agents share a conversation thread, coordinated by a manager that selects the next speaker and detects consensus [<a href="#ref-msagentpatterns2025">7</a>]. The pattern suits problems requiring diverse expertise contributing to a shared understanding, structured quality gates with several reviewers, and brainstorming; it suits clear-cut tasks and latency-sensitive applications poorly. Group chat is useful when the discussion is structured: role prompts with non-overlapping responsibilities (critic, verifier, planner), turn limits and an agenda, and a convergence rule (consensus threshold or judge-decided termination). The manager is essential; without one, the pattern is several agents producing text.</p>
+<h3 id="operational-patterns">16.1.3 Operational Patterns</h3>
+<h4 id="model-cascading">Model Cascading</h4>
+<p>Route requests to models of varying capability and cost according to task difficulty. BudgetMLAgent [<a href="#ref-budgetmlagent2024">2</a>] demonstrated a 94% cost reduction (from $0.93 to $0.05 per task) while maintaining success rates by using cheap models for most tasks and escalating only on failure. Implementation strategies are classifier-based routing (predict difficulty up front), try-cheap-first (escalate on failure), and confidence-based routing (use the cheap model’s confidence to decide). Cascading is easiest to implement correctly when escalation is triggered by <em>observable failure conditions</em>: a tool call that failed or timed out, output that violated a schema or policy check, a judge score below threshold, or an explicit structured abstention. Escalation based purely on the model’s self-reported confidence is unreliable unless calibrated (Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a>). A production refinement is <em>multi-stage cascading</em>: a cheap model drafts, a medium model verifies, and the expensive model handles only unresolved cases, which achieves high quality at low mean cost when verification is cheaper than regeneration.</p>
+<h4 id="human-in-the-loop">Human-in-the-Loop</h4>
+<p>Integrate human oversight at critical decision points: humans review the plan, approve high-risk steps, and intervene on uncertainty. Design considerations include clear criteria for when approval is required, asynchronous approval to avoid blocking, escalation paths when humans are unavailable, and risk-based triggering to avoid approval fatigue. The central question is where humans add the most marginal value: approving irreversible side effects (refunds, cancellations, deployments), resolving ambiguity in identity or authorization, adjudicating conflicts in evidence, and handling low-frequency, high-impact cases. For high-volume systems, human time is the scarcest resource, and the pattern must be paired with triage policies that page humans only when necessary (Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a>).</p>
+<h4 id="retrieval-augmented-generation">Retrieval-Augmented Generation</h4>
+<p>Ground responses in retrieved evidence rather than parametric knowledge alone. RAG reduces hallucination and provides access to private or recent information, and Chapter <a href="11-retrieval-and-evidence-management.html#ch:retrieval">11</a> structures the retrieval funnel. In production RAG is a pipeline of failure points: query formulation can be wrong, retrieval can be empty or irrelevant, formatting can distort meaning, and the model can ignore the evidence. It is best treated as <em>evidence-aware generation</em>: the agent cites, quotes, and links claims to sources, and abstains or qualifies when the sources are weak or conflicting. A robust variant is <em>RAG with verification</em>: after generating, re-check each claim against the evidence, by judge or by deterministic matching, and mark unsupported claims.</p>
+<h4 id="context-management">Context Management</h4>
+<p>Manage context windows across long sessions by summarizing older context, indexing detailed artifacts externally for retrieval on demand, and checkpointing intermediate results so later phases need only the pointers. Anthropic’s research system [<a href="#ref-anthropicresearch2025">1</a>] has agents summarize completed phases and store essentials in external memory before proceeding, and spawn fresh sub-agents with clean contexts when limits approach, maintaining continuity through careful handoffs. Summarization alone loses details and indexing alone adds retrieval overhead; the best designs combine them, with summaries for narrative continuity and artifacts for exact details. A useful safeguard is <em>context budgets by role</em>: a writer agent is not fed raw logs, while a debugger agent may need them. Chapter <a href="10-memory-state-and-forgetting.html#ch:memory">10</a> covers the side effects, including the deletion of constraints, that must be guarded against.</p>
+<h2 id="case-study-a-research-agent">16.2 Case Study: A Research Agent</h2>
+<p>A research agent answers complex questions by gathering evidence from several sources, synthesizing findings, and producing cited responses. It is among the most common agent applications, with implementations ranging from simple RAG to multi-agent systems.</p>
+<h3 id="requirements">16.2.1 Requirements</h3>
+<p>The agent must answer questions that require information beyond the model’s training data, synthesis across sources, accurate citation, and acknowledgment of uncertainty and conflicting evidence. The operational constraints are a budget of $0.50 per query, latency of 30 seconds typical and 60 maximum, 85% factual correctness on the evaluation set, and 95% verifiable citations. Citation accuracy is the dominant constraint in practice: users tolerate occasional uncertainty and lose trust rapidly when citations do not support claims, so citation is a first-class output requirement rather than a formatting afterthought.</p>
+<h3 id="architecture">16.2.2 Architecture</h3>
+<p>For queries answerable with a few searches, a single ReAct agent with web search, document retrieval, and a citation formatter suffices; it handles 70% of research queries within the budget and latency constraints. A practical detail is to separate <em>search</em> from <em>reading</em>. Search returns titles and snippets; reading fetches the relevant passages. An agent that answers from snippets produces citations that collapse under checking. The discipline is to use search to find candidate sources, read two to five top sources bounded by budget, extract claim-supporting passages into compact evidence notes, and generate an answer that cites only those notes.</p>
+<p>For complex queries, Anthropic’s multi-agent architecture [<a href="#ref-anthropicresearch2025">1</a>] provides a template: a lead agent analyzes the query and develops a strategy, spawns specialized sub-agents for different aspects, and aggregates their findings, while sub-agents execute focused searches with iterative refinement and return structured findings. The key decisions are <em>parallel exploration</em> (sub-agents search different aspects at once, reducing latency on multi-faceted queries), <em>artifact-based communication</em> (sub-agents write findings to external storage rather than passing everything through the coordinator, which prevents information loss and reduces token overhead), <em>context management</em> (fresh sub-agents with clean contexts as limits approach), and <em>iterative refinement</em> (search results inform subsequent searches). A further decision is <em>source diversity</em>: for contested topics, sub-agents are assigned by facet (technical detail, counter-arguments, official specifications, empirical studies) rather than by query string, so that the evidence contains independent sources rather than several pages repeating one claim.</p>
+<h3 id="implementation-details">16.2.3 Implementation Details</h3>
+<p><em>Query analysis</em> classifies the query (factual, comparative, explanatory, predictive) and estimates complexity from the number of entities and relations, whether freshness is required, whether synthesis is demanded (“compare,” “trade-off,” “why”), and whether the topic is contested. Simple queries go to the single-agent path, complex ones to the multi-agent path.</p>
+<p><em>Evidence gathering</em> executes the plan across web search for recent coverage, vector retrieval over a curated corpus for reliable background, and specialized databases for domain depth. Each piece of evidence becomes an object with provenance (at minimum a source identifier, a timestamp, and a quoted passage of one or two sentences, which dramatically improves later verification), a confidence estimate, and a relevance score. Budget is tracked, and gathering ends early when the budget is exhausted or the evidence is sufficient.</p>
+<p><em>Synthesis</em> is the expensive phase; the prompt may consume 10<span>,</span>000 tokens including query, plan, and evidence. A production technique is <em>evidence clustering</em>: group evidence by claim rather than by source, and keep at most <span class="math inline">\(m\)</span> supporting and <span class="math inline">\(n\)</span> conflicting passages per claim, which bounds the synthesis context while preserving the essential uncertainty.</p>
+<p><em>Verification</em> checks before returning that citations are accurate and claims supported, and flags low-confidence claims and conflicts. It combines deterministic checks (does each citation pointer exist; do quoted passages contain the key terms), a verifier model that matches claims to evidence, and a spot-check fallback that returns a qualified answer when the verifier is uncertain. Verification is mandatory for any system that claims to be citation-grounded.</p>
+<h3 id="evaluation-results">16.2.4 Evaluation Results</h3>
+<p>On an internal benchmark of 500 research queries:</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Metric</th>
+<th style="text-align: center;">Single-agent</th>
+<th style="text-align: center;">Multi-agent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Accuracy</td>
+<td style="text-align: center;">78%</td>
+<td style="text-align: center;">87%</td>
+</tr>
+<tr>
+<td style="text-align: left;">Citation accuracy</td>
+<td style="text-align: center;">91%</td>
+<td style="text-align: center;">96%</td>
+</tr>
+<tr>
+<td style="text-align: left;">Mean latency</td>
+<td style="text-align: center;">18s</td>
+<td style="text-align: center;">35s</td>
+</tr>
+<tr>
+<td style="text-align: left;">Mean cost</td>
+<td style="text-align: center;">$0.15</td>
+<td style="text-align: center;">$0.42</td>
+</tr>
+<tr>
+<td style="text-align: left;">Complex query accuracy</td>
+<td style="text-align: center;">62%</td>
+<td style="text-align: center;">84%</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The multi-agent architecture substantially improves accuracy on complex queries at higher latency and cost. A routing classifier that sends 70% of queries to the single-agent path and 30% to the multi-agent path reaches 83% overall accuracy at a mean cost of $0.23. Two lessons recur. Routing errors are expensive: a complex query sent down the single-agent path produces a plausible, under-sourced answer. And verification is a quality multiplier: even basic citation verification yields outsized gains in trustworthiness relative to its cost.</p>
+<h2 id="case-study-a-software-engineering-agent">16.3 Case Study: A Software Engineering Agent</h2>
+<p>Software-engineering agents resolve issues in codebases autonomously: reading code, understanding the problem, implementing a fix, and validating it. SWE-bench [<a href="#ref-swebench2024">13</a>] established this as a standard evaluation, and by 2025 over 90% of engineering teams integrate generative AI into their practice [<a href="#ref-sweevo2025">16</a>].</p>
+<h3 id="requirements-1">16.3.1 Requirements</h3>
+<p>The agent must understand issue descriptions and codebase structure, locate relevant code in large repositories, implement correct fixes, validate them through tests, and produce clean patches for human review. The operational constraints are repositories of up to 100K files, a limit of 100 actions, a cost of $2 per issue, and a target success rate of 50%+ on SWE-bench Verified. The constraints interact: large repositories amplify localization difficulty, step limits penalize meandering exploration, cost budgets penalize excessive reflection, and success requires both correctness and non-regression.</p>
+<h3 id="architecture-the-agentcomputer-interface">16.3.2 Architecture: The Agent–Computer Interface</h3>
+<p>SWE-agent [<a href="#ref-sweagent2024">15</a>] introduced the Agent–Computer Interface (ACI): a structured interface between the model and the development environment that transforms low-level operations into a simplified, model-friendly action set (view a file, edit a file with old and new text, search code, run tests, submit a patch). Its design principles are a <em>simplified action space</em> (a small set of concise commands rather than raw shell access, which reduces errors), <em>informative feedback</em> (substantive and brief environment responses, with the file viewer showing updated content after an edit), <em>guardrails</em> (an integrated linter that rejects syntactically invalid edits with precise error messages), and <em>context management</em> (history processors that keep the last five steps in a condensed window).</p>
+<p>From a systems perspective the ACI is an API-design problem. The agent needs reliable, reversible primitives aligned with the task rather than full power: prefer idempotent operations (viewing, searching, running tests), which can be repeated without changing the result; make edits explicit with both old and new text to reduce accidental corruption; expose structured diagnostics with file and line pointers; and provide safe defaults, running unit tests before broader suites. A highly effective addition is a <em>patch staging area</em>: edits are applied to a working tree and committed only after tests pass, which mirrors human workflow and avoids leaving the repository broken.</p>
+<h3 id="multi-agent-variant">16.3.3 Multi-Agent Variant</h3>
+<p>Open SWE [<a href="#ref-openswe2025">9</a>] extends SWE-agent with a manager that receives the issue and coordinates, a planner that researches the codebase and produces an execution plan the user can approve or modify, a programmer that executes the plan, and a reviewer that checks for common errors, runs tests and formatters, and reflects before the pull request. Role separation is the benefit: the planner optimizes for search and comprehension, the programmer for correct modification, the reviewer for catching regressions. Without it, a single agent oscillates between exploring and editing, which inflates steps and invites drift. A further refinement is <em>test-aware planning</em>: the planner identifies the minimal test command that validates the fix, so the programmer does not run expensive suites prematurely.</p>
+<h3 id="evaluation-results-1">16.3.4 Evaluation Results</h3>
+<p>Performance on SWE-bench Verified (500 problems) as of late 2025:</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">System</th>
+<th style="text-align: center;">Success rate</th>
+<th style="text-align: center;">Mean cost</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">SWE-agent + Claude 3.7</td>
+<td style="text-align: center;">55%</td>
+<td style="text-align: center;">$0.85</td>
+</tr>
+<tr>
+<td style="text-align: left;">OpenAI Codex</td>
+<td style="text-align: center;">69%</td>
+<td style="text-align: center;">$1.20</td>
+</tr>
+<tr>
+<td style="text-align: left;">Mini-SWE-agent (100 lines)</td>
+<td style="text-align: center;">65%</td>
+<td style="text-align: center;">$0.50</td>
+</tr>
+<tr>
+<td style="text-align: left;">Claude Code</td>
+<td style="text-align: center;">72%</td>
+<td style="text-align: center;">$1.50</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Mini-SWE-agent, a simple loop with chat memory and a single bash tool, reaches competitive results in about 100 lines of Python [<a href="#ref-springaibench2025">12</a>], which suggests that scaffolding sophistication matters less than model capability and interface design. On the harder SWE-bench Pro, performance drops sharply, with top models at 23% [<a href="#ref-swebenchpro2025">14</a>], which exposes the gap between benchmark and real-world capability. Two interpretations follow: interface quality often dominates orchestration complexity, and long-horizon reliability remains the bottleneck, since enterprise tasks require sustained coherence across many steps rather than correct local edits.</p>
+<h3 id="failure-analysis">16.3.5 Failure Analysis</h3>
+<p>Trajectory analysis reveals the common failure modes: wrong solution 35%, incomplete solution 25%, wrong file 15%, step limit exceeded 12%, environment error 8%, and regression 5% (Chapter <a href="15-evaluation-stability-cost-and-behavioral-fidelity.html#ch:evaluation">15</a> tabulates these). The analysis maps to interventions. Wrong file calls for a stronger localization stage (a planner role, retrieval over a code index, call-graph hints). Giving up calls for bounded tree search over candidate fixes or better step budgeting. Environment errors call for a more robust ACI with timeouts, retries, and stable error messages.</p>
+<h3 id="where-the-budget-goes">16.3.6 Where the Budget Goes</h3>
+<p>For coding agents, the expensive stage is usually not the one that writes the patch. Repository exploration is a distinct and costly phase: before any reasoning about the fix, the agent must decide which files could matter, which is largely a retrieval problem. Delegating it to a cheaper model while keeping a frontier model for the patch preserves resolution rates at materially lower cost [<a href="#ref-repoexplore2026">23</a>]. This is the stepwise routing of Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a> at phase granularity, and it works because the phases differ so sharply in what they demand. The same logic applies to search: a persistent search sub-agent that retains what it has found across a session eliminates the redundant retrieval that multi-agent systems otherwise repeat on every handoff [<a href="#ref-librarian2026">22</a>].</p>
+<h3 id="test-time-scaling-on-long-horizons">16.3.7 Test-Time Scaling on Long Horizons</h3>
+<p>Standard test-time scaling samples several complete trajectories and picks the best. For a coding agent whose trajectory runs to fifty steps, that is prohibitively expensive and mostly wasteful, since the trajectories agree for the first forty steps and diverge near the end. Replay addresses this by branching from a shared prefix rather than rerunning from scratch, so sampling costs the divergent suffix rather than the whole trajectory [<a href="#ref-swereplay2026">24</a>]. A broader study of test-time compute for agentic coding maps which scaling axes pay on long-horizon tasks [<a href="#ref-ttscoding2026">25</a>].</p>
+<h3 id="the-action-space-is-a-design-variable">16.3.8 The Action Space Is a Design Variable</h3>
+<p>One structural finding is cheap to act on. Coding agents conventionally edit by string matching against file contents, which fails on formatting drift and ambiguous matches, failures that look like reasoning errors and are not. Reframing the repository as a structured action space, with edits expressed against syntactic structure rather than text, removes that whole failure class [<a href="#ref-codestruct2026">21</a>]. The lesson transfers beyond code: when an agent fails often at a mechanical step, examine the interface before the model. The same point recurs for web agents, where typed actions outperform click-based browsing for reasons unrelated to model capability [<a href="#ref-typedactions2026">26</a>].</p>
+<h2 id="case-study-an-enterprise-customer-service-agent">16.4 Case Study: An Enterprise Customer-Service Agent</h2>
+<p>Enterprise customer-service agents handle inquiries across billing, technical support, and account management while respecting organizational policy and compliance.</p>
+<h3 id="requirements-2">16.4.1 Requirements</h3>
+<p>The agent must handle diverse inquiries accurately, route to specialists or escalate, respect access controls and privacy, maintain a consistent professional tone, and integrate with enterprise systems (CRM, ticketing, knowledge base). The operational constraints are an initial response under 5 seconds, 85%+ correct resolution, a human escalation rate under 15%, and 99.9% policy adherence. Policy compliance dominates: one severe data leak outweighs months of savings, so policy enforcement is a correctness criterion rather than a secondary guardrail.</p>
+<h3 id="architecture-1">16.4.2 Architecture</h3>
+<p>The agent uses a coordinator–worker pattern with domain specialists. A router agent classifies requests, routes to the appropriate specialist, handles handoffs, and enforces access controls. A billing agent holds tools for account lookup, invoices, payments, credits, and charge explanations, under PCI compliance and refund limits. A technical-support agent holds tools for knowledge-base search, diagnostics, ticketing, status checks, and service resets, under troubleshooting procedures and escalation criteria. An account-management agent holds tools for profile updates, plan changes, cancellation, and retention offers, under identity verification and change authorization. The critical design choice is that each specialist operates under a <em>least-privilege tool set</em>: the billing agent cannot reset services, and the support agent cannot process payments, which prevents injection or misrouting from becoming cross-domain damage (Chapter <a href="12-capability-boundaries-and-secure-tool-use.html#ch:capability">12</a>).</p>
+<h3 id="policy-enforcement">16.4.3 Policy Enforcement</h3>
+<p>Enforcement is layered. Input guards validate requests before processing: authentication, rate limits, content filters. Tool-level policies embed constraints in each tool:</p>
+<pre><code>@policy(requires_auth=True, max_refund=100, audit_log=True)
+def process_refund(account_id, amount, reason):
+    if amount &gt; policy.max_refund:
+        return require_approval(supervisor)
+    ...</code></pre>
+<p>Output guards scan responses for personal-data leakage, policy violations, and inappropriate content. Audit logging records every action with timestamp, user context, policy evaluation, and outcome. Two further controls are common: <em>dual-channel authorization</em>, in which sensitive actions require both agent intent and a verified user confirmation (a one-time code or explicit consent), and <em>invariant checks</em> that the model cannot override (refund limits, mandatory identity verification). Even if the model “wants” to violate policy, it cannot execute the violating action.</p>
+<h3 id="evaluation-results-2">16.4.4 Evaluation Results</h3>
+<p>Over 30 days of deployment:</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Metric</th>
+<th style="text-align: center;">Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Requests handled</td>
+<td style="text-align: center;">127<span>,</span>000</td>
+</tr>
+<tr>
+<td style="text-align: left;">Resolution rate (no escalation)</td>
+<td style="text-align: center;">86.2%</td>
+</tr>
+<tr>
+<td style="text-align: left;">Customer satisfaction (CSAT)</td>
+<td style="text-align: center;">4.3/5.0</td>
+</tr>
+<tr>
+<td style="text-align: left;">Policy violations</td>
+<td style="text-align: center;">0.02%</td>
+</tr>
+<tr>
+<td style="text-align: left;">Mean first response</td>
+<td style="text-align: center;">2.1s</td>
+</tr>
+<tr>
+<td style="text-align: left;">Mean resolution time</td>
+<td style="text-align: center;">45s</td>
+</tr>
+<tr>
+<td style="text-align: left;">Cost per interaction</td>
+<td style="text-align: center;">$0.28</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Compared with human agents, the system shows a <span class="math inline">\(12\times\)</span> cost reduction ($0.28 against $3.40) with comparable resolution rates (86% against 91%) and faster response. Operationally the most important metric is tail risk: the rare interaction that triggers escalation, policy review, or incident response. Systems therefore add tail-based sampling and retention (Chapter <a href="14-trace-semantics-and-agent-telemetry.html#ch:traces">14</a>) to keep all policy-related traces and enable rapid forensic analysis.</p>
+<h2 id="case-study-a-multi-agent-collaboration-system">16.5 Case Study: A Multi-Agent Collaboration System</h2>
+<p>This case study examines a content-production system using role-based collaboration: a researcher gathers information and sources and produces a research brief; a writer creates a draft from the brief; an editor reviews and improves it and returns feedback; and a publisher formats and distributes. The primary pattern is a sequential pipeline with a reflection loop between editor and writer.</p>
+<p>The key design decisions are clear handoff protocols (each agent produces structured output with explicit fields for the next: a research brief with key facts, sources, and gaps; a draft with content, tone, and target audience), a shared context store for project context, style guides, and accumulated knowledge, and escalation paths to human review for legal concerns or factual disputes. Two further decisions are essential for reliability: <em>source integrity</em>, in which the researcher stores extracted passages as well as URLs so the editor can verify claims without re-browsing, and <em>revision discipline</em>, in which the writer applies editor feedback through diff-based or section-by-section edits, since unstructured revision introduces regressions.</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Metric</th>
+<th style="text-align: center;">Multi-agent</th>
+<th style="text-align: center;">Single agent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Factual accuracy</td>
+<td style="text-align: center;">94%</td>
+<td style="text-align: center;">82%</td>
+</tr>
+<tr>
+<td style="text-align: left;">Style consistency</td>
+<td style="text-align: center;">91%</td>
+<td style="text-align: center;">76%</td>
+</tr>
+<tr>
+<td style="text-align: left;">Human edits required</td>
+<td style="text-align: center;">1.2/article</td>
+<td style="text-align: center;">4.7/article</td>
+</tr>
+<tr>
+<td style="text-align: left;">Time to publish</td>
+<td style="text-align: center;">8 min</td>
+<td style="text-align: center;">12 min</td>
+</tr>
+<tr>
+<td style="text-align: left;">Cost per article</td>
+<td style="text-align: center;">$0.85</td>
+<td style="text-align: center;">$0.45</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The multi-agent approach produces higher quality at higher cost, and for high-volume, quality-sensitive content the reduced human editing justifies the additional agent cost. A common optimization is cascading inside the crew: cheaper models for drafting and formatting, expensive ones for research verification and final editing, which cuts cost without materially degrading quality because the editor stage catches many errors.</p>
+<h3 id="diagnosing-a-multi-agent-failure">16.5.1 Diagnosing a Multi-Agent Failure</h3>
+<p>Multi-agent systems fail in a way single-agent systems do not. The agent that produces the wrong output is often not the agent that caused it: a researcher returns a subtly wrong figure, the analyst reasons correctly from it, and the writer presents it confidently. Three agents behaved well and the system was wrong. This is the failure-attribution problem of Chapter <a href="14-trace-semantics-and-agent-telemetry.html#ch:traces">14</a>, and it is the main operational cost of multi-agent design. Budget for it explicitly. Record inter-agent edges, since the message graph is the evidence that dependency-based attribution methods need [<a href="#ref-falat2026">28</a>, <a href="#ref-influencegraph2026">29</a>]. Attribute at the corpus level, since a failure mode appearing in 3% of runs is invisible one trace at a time [<a href="#ref-insights2026">30</a>]. Inject faults deliberately, so that attribution tooling is tested against known faults before an incident [<a href="#ref-otelmas2026">31</a>]. And watch for cascades, since adversarial influence propagating across agents produces system-level failures whose signals are distributed across the trace [<a href="#ref-caspian2026">27</a>]. Weigh this against the parallelism gain before adding the fourth agent: the coordination cost is visible in the bill, and the attribution cost is visible only during an outage.</p>
+<h3 id="when-a-peer-agent-is-wrong">16.5.2 When a Peer Agent Is Wrong</h3>
+<p>Multi-agent designs assume peers are cooperative and competent. Neither holds once an agent is compromised or merely unreliable, and the failure propagates because agents treat peer output as trusted input. This is the Byzantine problem, and it now has a treatment for agent networks: Self-Anchored Consensus is a decentralized filter-and-refine protocol in which agents exchange responses, locally evaluate and filter unreliable messages, and refine their own outputs, with robustness conditions on the communication graph that ensure honest agents preserve reliable information despite Byzantine influence [<a href="#ref-byzantine2026">32</a>]. The transferable content is the robustness condition. Distributed systems learned long ago that tolerating <span class="math inline">\(F\)</span> faulty participants constrains the topology, and the same holds here: with a single aggregator, one compromised researcher reaches the user unfiltered regardless of how many peers agreed. The graph should be designed for the fault count one is willing to tolerate, which argues against the thin hierarchies that minimize communication cost.</p>
+<h2 id="anti-patterns">16.6 Anti-Patterns</h2>
+<p><em>God agent.</em> A single agent responsible for everything produces a bloated prompt, degraded instruction following, and difficult debugging. The mechanism is <em>context interference</em>: adding instructions changes behavior in unrelated parts of the task, which is predictable in large prompts. Decompose into specialized agents with isolated instructions.</p>
+<p><em>Over-orchestration.</em> A complex multi-agent system for a simple task adds latency, cost, and failure modes without benefit. Start simple and add complexity only when a constraint demands it.</p>
+<p><em>Unbounded loops.</em> Agent loops without termination conditions run indefinitely. Set iteration limits and cost caps, and enforce them in the runtime: deny new tool calls when the remaining budget is insufficient, regardless of what the model proposes.</p>
+<p><em>Context explosion.</em> Context accumulated without management eventually exceeds limits or degrades performance. Implement summarization, pruning, and external storage.</p>
+<p><em>Trust without verification.</em> Assuming agent outputs are correct propagates errors. Verify, especially high-stakes outputs.</p>
+<p><em>Synchronous everything.</em> Blocking on every interaction limits throughput. Use asynchronous patterns and parallel execution where possible.</p>
+<p><em>Ignoring partial failure.</em> Treating a multi-agent system as all-or-nothing wastes completed work. Checkpoint progress and enable recovery.</p>
+<p><em>Schema drift.</em> Agents gradually stop adhering to structured output formats as prompts evolve, which breaks downstream automation. Validate and reject malformed output early, and treat schema compliance as a first-class evaluation metric.</p>
+<p><em>Parallelism by default.</em> Splitting a task across agents pays only when the subtasks are separable. Once they share context, communication overhead consumes the parallelism gain, and analysis of multi-agent coding shows the crossover arriving earlier than intuition suggests [<a href="#ref-cohesion2026">18</a>]. If two agents need to keep telling each other what they found, they should have been one agent.</p>
+<p><em>Constraints in the prompt.</em> A constraint in a system prompt is a suggestion with a half-life, since compaction can summarize it away mid-run with nothing in the trace to mark it [<a href="#ref-govdecay2026">19</a>]. Enforcement belongs in the action path (Chapter <a href="13-alignment-policies-and-constraint-enforcement.html#ch:alignment">13</a>).</p>
+<p><em>Abort that does not abort.</em> Removing a rejected branch from the transcript leaves the serving session’s cache state intact, and the model can keep attending to reasoning the application believes it discarded [<a href="#ref-abortedkv2026">17</a>]. Verify that abort is complete at every layer holding state (Chapter <a href="08-speculation-parallelism-and-commit-protocols.html#ch:speculation">8</a>).</p>
+<p><em>Unversioned harness.</em> Attributing a score to a model when the harness changed too means the next regression is debugged against the wrong suspect [<a href="#ref-modelharness2026">20</a>]. Version both.</p>
+<h2 id="pattern-selection-guide">16.7 Pattern Selection Guide</h2>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Characteristic</th>
+<th style="text-align: left;">Recommended pattern</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Simple, single-step task</td>
+<td style="text-align: left;">Direct call (no agent)</td>
+</tr>
+<tr>
+<td style="text-align: left;">Multi-step, adaptive</td>
+<td style="text-align: left;">ReAct</td>
+</tr>
+<tr>
+<td style="text-align: left;">Complex, plannable</td>
+<td style="text-align: left;">Plan-then-Execute</td>
+</tr>
+<tr>
+<td style="text-align: left;">Quality-critical</td>
+<td style="text-align: left;">Reflection</td>
+</tr>
+<tr>
+<td style="text-align: left;">Multiple valid approaches</td>
+<td style="text-align: left;">Tree search</td>
+</tr>
+<tr>
+<td style="text-align: left;">Clear workflow stages</td>
+<td style="text-align: left;">Sequential pipeline</td>
+</tr>
+<tr>
+<td style="text-align: left;">Multiple domains</td>
+<td style="text-align: left;">Coordinator–worker</td>
+</tr>
+<tr>
+<td style="text-align: left;">Real-time, conversational</td>
+<td style="text-align: left;">Adaptive handoff</td>
+</tr>
+<tr>
+<td style="text-align: left;">Independent subtasks</td>
+<td style="text-align: left;">Parallel collaboration</td>
+</tr>
+<tr>
+<td style="text-align: left;">Cost-sensitive</td>
+<td style="text-align: left;">Model cascading</td>
+</tr>
+<tr>
+<td style="text-align: left;">High-stakes</td>
+<td style="text-align: left;">Human-in-the-loop</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>Patterns compose. A coordinator–worker system might use ReAct within each worker, reflection for quality-critical outputs, and cascading for cost control. A practical selection heuristic identifies the <em>dominant risk</em>. If the risk is a wrong next step, prefer planning or supervision. If it is a wrong final output, prefer reflection and verification. If it is a budget blow-up, prefer cascading and strict loop bounds. If it is a policy violation, prefer least-privilege tools and human gating. This focuses the choice on engineering constraints rather than fashion.</p>
+<h2 id="summary">16.8 Summary</h2>
+<p>Design patterns encode proven solutions. Reasoning patterns (ReAct, Plan-then-Execute, Reflection, Tree Search) structure how an agent thinks. Orchestration patterns (pipeline, coordinator–worker, handoff, parallel, group chat) organize collaboration. Operational patterns (cascading, human-in-the-loop, RAG, context management) address production concerns.</p>
+<p>The case studies show the patterns in practice. Research agents use ReAct for simple queries and multi-agent architectures for complex ones, with artifact-based communication managing context. Software-engineering agents rely on a well-designed Agent–Computer Interface, with the finding that a hundred-line implementation can match an elaborate framework. Enterprise agents combine coordinator–worker orchestration with strict policy enforcement. Content-production systems use a pipeline with a reflection loop, and pay an attribution cost that must be budgeted.</p>
+<p>Anti-patterns warn against god agents, over-orchestration, unbounded loops, context explosion, trust without verification, and the newer failures: constraints in the prompt, aborts that do not abort, and unversioned harnesses. Pattern selection depends on the dominant risk, and patterns compose.</p>
+<p>If there is one principle to carry out of the book, it is that sophistication has to justify itself against a constraint. Simple tasks take simple patterns; complex tasks take composed ones. Start minimal, and add a component only when the constraint it satisfies can be named and the measurement that says the simpler version failed can be shown. Every chapter has supplied a version of the same finding. Budget-aware agents beat budget-blind ones with the same models. Cheap configurations sit on the Pareto frontier while expensive ones sit below it. A hundred-line agent matches an elaborate framework. Deciding when to stop outperforms adding a tool. Enforcement in twenty lines of predicate outperforms enforcement in a paragraph of careful prose. None of that is an argument for building less. It is an argument for building the control structure first, and letting capability sit inside it.</p>
+<h2 class="unnumbered" id="exercises">Exercises</h2>
+<ol>
+<li><p><strong>Pattern selection.</strong> For each scenario, select the most appropriate pattern or patterns and justify the choice: (a) travel planning with flights, hotels, and activities; (b) code review with style, security, and logic checks; (c) customer-complaint handling of varying complexity; (d) a scientific literature review synthesizing 50 papers.</p></li>
+<li><p><strong>ReAct implementation.</strong> Implement a ReAct agent for question answering with web search, including the thought–action–observation loop, termination conditions, error handling, and token-budget tracking. Evaluate it on 20 diverse questions.</p></li>
+<li><p><strong>Multi-agent design.</strong> Design a multi-agent system for automated report generation from structured data. Specify the agents and their roles, the communication protocol, the artifact formats, and the failure handling, and estimate the cost per report.</p></li>
+<li><p><strong>Anti-pattern analysis.</strong> A system uses a single agent with a 20<span>,</span>000-token prompt handling customer service, technical support, and sales, and response quality has degraded as capabilities were added. Diagnose the anti-patterns and propose a refactored architecture.</p></li>
+<li><p><strong>Pattern composition.</strong> Design an agent system combining at least three patterns for a legal document-review task requiring document understanding, clause extraction, risk identification, and summary generation. Justify each pattern and describe their interaction.</p></li>
+<li><p><strong>Attribution budget.</strong> For the content-production crew, estimate the cost of recording inter-agent edges and evidence references in every trace, and compare it with the cost of one undiagnosed factual error reaching publication.</p></li>
+</ol>
+<h2 class="unnumbered" id="bibliographic-notes">Bibliographic Notes</h2>
+<p>The ReAct pattern is introduced by Yao et al. [<a href="#ref-react2022">10</a>]. Reflexion [<a href="#ref-reflexion2023">11</a>] adds verbal self-reflection for iterative improvement. LATS [<a href="#ref-lats2023">5</a>] combines reflection with Monte Carlo tree search. Multi-agent debate [<a href="#ref-mar2025">6</a>] addresses degeneration of thought through several critics.</p>
+<p>Multi-agent orchestration patterns are documented by the Microsoft Azure Architecture Center [<a href="#ref-msagentpatterns2025">7</a>] and Google’s Agent Development Kit [<a href="#ref-googleadk2025">4</a>]. Event-driven multi-agent patterns are explored by Confluent [<a href="#ref-confluentmas2025">3</a>].</p>
+<p>Anthropic’s engineering blog [<a href="#ref-anthropicresearch2025">1</a>] details their multi-agent research system, including artifact-based communication and context management. SWE-agent [<a href="#ref-sweagent2024">15</a>] introduces the Agent–Computer Interface. Open SWE [<a href="#ref-openswe2025">9</a>] extends it with a multi-agent architecture. Mini-SWE-agent’s competitive performance with minimal scaffolding is reported in [<a href="#ref-springaibench2025">12</a>]. The 2025 landscape of coding agents is surveyed in [<a href="#ref-sweevo2025">16</a>]; SWE-bench Pro [<a href="#ref-swebenchpro2025">14</a>] provides the harder evaluation; OpenAI Codex [<a href="#ref-openaicodex2025">8</a>] demonstrates a production coding agent.</p>
+<h2 class="unnumbered" id="bibliography">Bibliography</h2>
+<ol>
+<li><div id="ref-anthropicresearch2025">
+
+</div>
+<p>Anthropic. How We Built Our Multi-Agent Research System. Engineering blog, 2025.</p></li>
+<li><div id="ref-budgetmlagent2024">
+
+</div>
+<p>A. Gandhi et al. BudgetMLAgent: A Cost-Effective LLM Multi-Agent System for Automating Machine Learning Tasks. <span><em>arXiv:2411.07464</em></span>, 2024.</p></li>
+<li><div id="ref-confluentmas2025">
+
+</div>
+<p>Confluent. Four Design Patterns for Event-Driven Multi-Agent Systems. Blog post, January 2025.</p></li>
+<li><div id="ref-googleadk2025">
+
+</div>
+<p>Google Developers. Developer’s Guide to Multi-Agent Patterns in ADK. Blog post, December 2025.</p></li>
+<li><div id="ref-lats2023">
+
+</div>
+<p>A. Zhou et al. Language Agent Tree Search Unifies Reasoning, Acting, and Planning in Language Models. <span><em>arXiv:2310.04406</em></span>, 2023.</p></li>
+<li><div id="ref-mar2025">
+
+</div>
+<p>Tian Liang, Zhiwei He, Wenxiang Jiao et al. Encouraging Divergent Thinking in Large Language Models through Multi-Agent Debate. <span><em>arXiv:2305.19118</em></span>, 2023.</p></li>
+<li><div id="ref-msagentpatterns2025">
+
+</div>
+<p>Microsoft. AI Agent Orchestration Patterns. Azure Architecture Center, 2025.</p></li>
+<li><div id="ref-openaicodex2025">
+
+</div>
+<p>OpenAI. Introducing Codex. Blog post, May 2025.</p></li>
+<li><div id="ref-openswe2025">
+
+</div>
+<p>LangChain. Introducing Open SWE: An Open-Source Asynchronous Coding Agent. Blog post, August 2025.</p></li>
+<li><div id="ref-react2022">
+
+</div>
+<p>S. Yao, et al. ReAct: Synergizing Reasoning and Acting in Language Models. <span><em>ICLR</em></span>, 2023.</p></li>
+<li><div id="ref-reflexion2023">
+
+</div>
+<p>N. Shinn, et al. Reflexion: Language Agents with Verbal Reinforcement Learning. <span><em>NeurIPS</em></span>, 2023.</p></li>
+<li><div id="ref-springaibench2025">
+
+</div>
+<p>Spring. Introducing Spring AI Agents and Spring AI Bench. Blog post, October 2025.</p></li>
+<li><div id="ref-swebench2024">
+
+</div>
+<p>C. E. Jimenez, J. Yang, A. Wettig, et al. SWE-bench: Can Language Models Resolve Real-world Github Issues? <span><em>ICLR</em></span>, 2024.</p></li>
+<li><div id="ref-swebenchpro2025">
+
+</div>
+<p>X. Deng, et al. SWE-Bench Pro: Can AI Agents Solve Long-Horizon Software Engineering Tasks? <span><em>arXiv:2509.16941</em></span>, November 2025.</p></li>
+<li><div id="ref-sweagent2024">
+
+</div>
+<p>J. Yang, C. E. Jimenez, A. Wettig, et al. SWE-agent: Agent-Computer Interfaces Enable Automated Software Engineering. <span><em>NeurIPS</em></span>, 2024.</p></li>
+<li><div id="ref-sweevo2025">
+
+</div>
+<p>SWE-EVO: Benchmarking Coding Agents in Long-Horizon Software Evolution Scenarios. <span><em>arXiv:2512.18470</em></span>, 2025.</p></li>
+<li><div id="ref-abortedkv2026">
+
+</div>
+<p>Guijia Zhang and Harry Yang. “Aborted but Not Forgotten: KV-Cache Retention Breaks Rollback Consistency in Language Agents.” arXiv:2608.15939, 2026.</p></li>
+<li><div id="ref-cohesion2026">
+
+</div>
+<p>Xu Yang et al. “When Parallelism Pays Off: Cohesion-Aware Task Partitioning for Multi-Agent Coding.” arXiv:2606.00953, 2026.</p></li>
+<li><div id="ref-govdecay2026">
+
+</div>
+<p>Shiyang Chen. “Governance Decay: How Context Compaction Silently Erases Safety Constraints in Long-Horizon LLM Agents.” arXiv:2606.22528, 2026.</p></li>
+<li><div id="ref-modelharness2026">
+
+</div>
+<p>Harsh Raj et al. “Model or Harness? An Interaction-Centric Taxonomy for Localizing Agent Failures.” arXiv:2607.28802, 2026.</p></li>
+<li><div id="ref-codestruct2026">
+
+</div>
+<p>Myeongsoo Kim et al. “CODESTRUCT: Code Agents over Structured Action Spaces.” arXiv:2604.05407, 2026. ACL 2026.</p></li>
+<li><div id="ref-librarian2026">
+
+</div>
+<p>Seunghyuk Cho et al. “Long Live the Librarian! A Persistent Search Sub-Agent for Energy-Efficient Multi-Agent Software Engineering Systems.” arXiv:2605.27787, 2026. EMNLP.</p></li>
+<li><div id="ref-repoexplore2026">
+
+</div>
+<p>Mohammad Nour Al Awad and Sergey Ivanov. “Cost-Effective Repository Exploration for Agentic Issue Localization.” arXiv:2608.29675, 2026.</p></li>
+<li><div id="ref-swereplay2026">
+
+</div>
+<p>Yifeng Ding and Lingming Zhang. “SWE-Replay: Efficient Test-Time Scaling for Software Engineering Agents.” arXiv:2601.22129, 2026.</p></li>
+<li><div id="ref-ttscoding2026">
+
+</div>
+<p>Joongwon Kim et al. “Scaling Test-Time Compute for Agentic Coding.” arXiv:2604.16529, 2026.</p></li>
+<li><div id="ref-typedactions2026">
+
+</div>
+<p>Linxi Jiang et al. “Web Agents Should Use Typed Actions Instead of Click-Based Browsing.” arXiv:2602.17245, 2026. ICML 2026.</p></li>
+<li><div id="ref-caspian2026">
+
+</div>
+<p>Kavana Venkatesh et al. “CASPIAN: Online Detection and Attribution of Cascade Attacks in LLM Multi-Agent Systems via Cross-Channel Causal Monitoring.” arXiv:2605.19240, 2026.</p></li>
+<li><div id="ref-falat2026">
+
+</div>
+<p>Md Nakhla Rafi et al. “FALAT: Tracing Failures in LLM Agent Trajectories via Dependency-Guided Search.” arXiv:2606.00765, 2026.</p></li>
+<li><div id="ref-influencegraph2026">
+
+</div>
+<p>Yarden Bakish et al. “Adaptive Influence Graphs for Failure Attribution in Multi-Agent Systems.” arXiv:2608.24361, 2026.</p></li>
+<li><div id="ref-insights2026">
+
+</div>
+<p>Akshay Manglik et al. “Insights Generator: Systematic Corpus-Level Trace Diagnostics for LLM Agents.” arXiv:2605.21347, 2026.</p></li>
+<li><div id="ref-otelmas2026">
+
+</div>
+<p>Zahra Seyedghorban et al. “Observability and Fault Injection for LLM-Based Multi-Agent Systems in Software Engineering.” arXiv:2608.24271, 2026.</p></li>
+<li><div id="ref-byzantine2026">
+
+</div>
+<p>Haejoon Lee et al. “Robust Multi-Agent LLMs under Byzantine Faults.” arXiv:2605.09076, 2026. EMNLP 2026.</p></li>
+</ol>
+
+<div id="bottom"><a href="15-evaluation-stability-cost-and-behavioral-fidelity.html" rel="prev">&laquo; Evaluation: Stability, Cost, and Behavioral Fidelity</a> &nbsp;|&nbsp; <a href="index.html">Contents</a><br>&copy; 2026 Madhava Gaikwad. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
+</div>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</body>
+</html>

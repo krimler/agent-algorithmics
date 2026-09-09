@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 14: Trace Semantics and Agent Telemetry — Agent Algorithmics</title>
+<meta name="description" content="An agent fails in production. The input, the output, and the bill are available. The forty decisions in between happened, produced the failure, and left…">
+<meta name="author" content="Madhava Gaikwad">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="book">
+<meta property="og:title" content="Chapter 14: Trace Semantics and Agent Telemetry — Agent Algorithmics">
+<meta property="og:description" content="An agent fails in production. The input, the output, and the bill are available. The forty decisions in between happened, produced the failure, and left…">
+<meta property="og:url" content="https://krimler.github.io/agent-algorithmics/14-trace-semantics-and-agent-telemetry.html">
+<link rel="canonical" href="https://krimler.github.io/agent-algorithmics/14-trace-semantics-and-agent-telemetry.html">
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Trace Semantics and Agent Telemetry", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 14, "url": "https://krimler.github.io/agent-algorithmics/14-trace-semantics-and-agent-telemetry.html"}</script>
+
+</head>
+<body>
+<div id="page">
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="13-alignment-policies-and-constraint-enforcement.html" rel="prev">&laquo; Alignment, Policies, and Constraint Enforcement</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="15-evaluation-stability-cost-and-behavioral-fidelity.html" rel="next">Evaluation: Stability, Cost, and Behavioral Fidelity &raquo;</a></div>
+<h1 id="ch:traces"><span class="part">Part III: Observability and Evaluation</span>Chapter 14. Trace Semantics and Agent Telemetry</h1><p>An agent fails in production. The input, the output, and the bill are available. The forty decisions in between happened, produced the failure, and left no record.</p>
+<p>What follows is familiar. Someone proposes a prompt change. Someone else proposes a different model. Both are guesses, both are plausible, and neither can be evaluated, because the evidence that would settle the question was never written down. Fixes made in this environment are superstitious: the change ships, the failure stops recurring for a week, and nobody knows whether the two facts are related. Observability is what converts that argument into an investigation.</p>
+<p>Agent systems make observability harder than conventional services do. A typical microservice executes deterministic code paths with explicit control flow. An agent executes a stochastic program whose control flow is partly synthesized at runtime: it plans, chooses tools, retries, branches, and composes outputs from retrieved context. Its failures are often semantic rather than operational, so the system can be healthy by CPU and error-rate metrics and still be wrong, unsafe, or wasteful.</p>
+<p>This chapter makes traces first-class. We define <em>trace semantics</em>, a structure for representing an agent’s execution as records that can be stored, queried, replayed, and audited. We then develop telemetry that captures metrics, logs, and traces with bounded overhead and bounded privacy risk. Finally we analyze causality in agent executions, so that cost, latency, and failure can be attributed to specific decisions. The treatment draws on distributed systems (OpenTelemetry, Jaeger, Zipkin), database systems (query plans, execution traces), and performance engineering (the USE method, latency histograms). The goal is an agent that explains itself: what it did, why, what it cost, and what went wrong.</p>
+<h2 id="the-observability-problem">14.1 The Observability Problem</h2>
+<p>Observability is the ability to infer a system’s internal state from its externally visible outputs. For agents it answers five operational questions: what happened (the sequence of actions, tool calls, model calls, retries, and decisions), why (the decision context and the factors that influenced selection), how long (latency at each step and end to end, including queueing and backoff), how much (cost in tokens, dollars, API calls, and other billable resources), and what went wrong (root cause and contributing causes). These questions must be answerable from telemetry <em>without reproducing the incident in production</em>. Reproduction is expensive, sometimes impossible because the context has changed, and often unsafe because it may repeat harmful actions.</p>
+<h3 id="observability-and-monitoring">14.1.1 Observability and Monitoring</h3>
+<p>Monitoring checks predefined conditions: is latency below the objective, is the error rate acceptable, is cost below budget? Monitoring is necessary and insufficient. Observability supports questions nobody thought to ask. When a novel failure occurs, observability supplies the raw material for forming and testing hypotheses; the distinction mirrors that between testing, which validates known invariants, and debugging, which investigates unknown problems.</p>
+<p>Agents need observability more than conventional systems for four reasons. Control flow is synthesized, so the agent decides its own sequence of steps. Failures are semantic, so wrong answers and unsafe actions may raise no exception. Cost is a first-class service objective, so token pricing and tool billing require precise attribution. And reasoning is a dependency, so a diagnosis often depends on what the agent believed at the time.</p>
+<p>Two engineering constraints follow. Telemetry must preserve the <em>causal relations</em> between steps (parentage, dependency links, propagation context); without causality, debugging becomes archaeology. And telemetry must observe <em>payload discipline</em>: raw prompts, retrieved documents, and tool results may contain personal data, secrets, or proprietary content, so observability cannot simply log everything and must support selective capture, redaction, and access control.</p>
+<h3 id="the-three-pillars">14.1.2 The Three Pillars</h3>
+<p>Observability rests on logs, metrics, and traces, which answer different questions and scale differently. <em>Logs</em> are timestamped records of discrete events, high in cardinality and dimension, and best for explaining specific failures: stack traces, error messages, unusual tool outputs. <em>Metrics</em> are numeric measurements aggregated over time, low in cardinality and optimized for alerting and trends; they answer “is something wrong overall?” and never “why did request <span class="math inline">\(X\)</span> fail?” <em>Traces</em> connect events across time and components; a trace represents a complete unit of work, a user request and everything it caused, and it is the backbone of agent observability because agent debugging depends on request-level causality: this tool call happened because the agent chose that plan step, on the basis of these retrieved documents.</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Pillar</th>
+<th style="text-align: left;">Cardinality</th>
+<th style="text-align: left;">Use case</th>
+<th style="text-align: left;">Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Logs</td>
+<td style="text-align: left;">High</td>
+<td style="text-align: left;">Debug specific events</td>
+<td style="text-align: left;">“Tool X failed with error Y”</td>
+</tr>
+<tr>
+<td style="text-align: left;">Metrics</td>
+<td style="text-align: left;">Low</td>
+<td style="text-align: left;">Monitor aggregate health</td>
+<td style="text-align: left;">“P99 latency = 2.3s”</td>
+</tr>
+<tr>
+<td style="text-align: left;">Traces</td>
+<td style="text-align: left;">Medium</td>
+<td style="text-align: left;">Understand request flow</td>
+<td style="text-align: left;">“Request took 5 steps, 1.2s total”</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The practical workflow is that metrics detect an anomaly (a latency spike, a cost surge, a quality drop), traces localize it to a path (retrieval followed by retries), and logs explain the detailed failure (a tool timeout, a malformed payload).</p>
+<h2 id="trace-structure">14.2 Trace Structure</h2>
+<p>A trace is a directed acyclic graph of <em>spans</em> representing a unit of work. The graph is the representation of causality in a tool-using agent’s execution.</p>
+<h3 id="spans">14.2.1 Spans</h3>
+<p>A span is the atomic unit of tracing, representing a single operation:</p>
+<pre><code>Span {
+    trace_id: TraceID,               // Identifies the overall trace
+    span_id: SpanID,                 // Identifies this span
+    parent_span_id: SpanID?,         // Parent in the DAG (null for root)
+    operation_name: String,          // What this span represents
+    start_time: Timestamp,
+    end_time: Timestamp,
+    status: Status,                  // OK, ERROR, UNSET
+    attributes: Map&lt;String, Value&gt;,  // Key-value metadata
+    events: List&lt;Event&gt;,             // Timestamped annotations
+    links: List&lt;Link&gt;                // References to related spans
+}</code></pre>
+<p>Spans should be bounded in time and meaning: “execute tool call,” “embed query,” “generate answer.” Coarse spans hide where time and cost accrue; fine spans explode telemetry volume. Parent–child relations express containment and synchronous causality (the child occurred as part of the parent). Links express non-tree causality: fan-in, fan-out, batching, asynchronous callbacks, and cross-trace relationships such as a background evaluation referencing the original request. Spans carry a kind, and for agents the kinds matter for cost and attribution: <span class="smallcaps">client</span> spans are outbound calls (model provider, tool API), <span class="smallcaps">server</span> spans are inbound handling (a tool server receiving a call), and <span class="smallcaps">internal</span> spans are in-process work (prompt assembly, parsing, ranking).</p>
+<p>A span is useful only if its trace context propagates correctly across thread boundaries, network calls, tool servers, and sub-agents. Broken propagation produces disconnected traces and destroys causal analysis. In an agent system, propagation must cover model calls (HTTP clients), tool calls (HTTP, RPC, or local functions), sub-agent invocations (in-process or remote), and background evaluation tasks (asynchronous, with links).</p>
+<h3 id="agent-specific-span-types">14.2.2 Agent-Specific Span Types</h3>
+<p>OpenTelemetry’s GenAI semantic conventions [<a href="#ref-otelgenai2025">9</a>] define standard span types for agent operations, and standardization matters because it enables cross-vendor tooling, consistent dashboards, and portable queries. <em>Model spans</em> (<code>gen_ai.operation.name = chat</code>) represent calls to a language model, with attributes for the requested model, the temperature, and the input and output token counts; their duration runs from request submission to the final token. <em>Agent spans</em> (<code>invoke_agent</code>) represent an agent or a structured agent step such as a planner or executor, with attributes for the agent’s name and identifier and the conversation identifier; their children are model calls, tool executions, and sub-agent invocations. <em>Tool spans</em> (<code>execute_tool</code>) represent tool executions, with attributes for the tool’s name and type; raw arguments and results may contain secrets, so hashes, schema-validated summaries, redacted views, or references to secure blob storage are preferred. <em>Embedding spans</em> (<code>embeddings</code>) represent embedding generation, with dimension count and token usage; they often dominate retrieval pipelines by volume and are typically sampled.</p>
+<p>Agent observability benefits from further attributes beyond the base conventions: plan attributes (plan identifier, step index, chosen tool, retry policy), retrieval attributes (corpus identifier, top-<span class="math inline">\(k\)</span>, filter predicates, result count), safety attributes (policy decisions and whether approval was required), and versioning attributes (prompt template version, policy version, model configuration hash). The versioning attributes are essential for regressions: when quality drops, the traces must be correlated with the exact prompt, policy, and model version in effect.</p>
+<h3 id="example-trace">14.2.3 Example Trace</h3>
+<p>Figure <a href="#fig:span-dag">14.1</a> shows the trace of a retrieval-augmented agent answering a question.</p>
+<figure id="fig:span-dag">
+<img src="figures/14-trace-semantics-and-agent-telemetry-fig1-7ee7c5cf89.png" />
+<figcaption><strong>Figure 14.1.</strong> A span tree for one request. Each child is an operation the agent performed as part of the root; durations and token counts on the spans make latency and cost attribution arithmetic.</figcaption>
+</figure>
+<p>The trace supports several classes of question. Latency decomposition: answer generation dominates at 1.2 s. Token accounting: 2<span>,</span>650 input tokens and 350 output tokens. Pipeline correctness: retrieval returned five results, so a low-quality answer points at retrieval quality. Change analysis: comparing across prompt versions shows whether query-understanding tokens grew because the system prompt lengthened. A robust trace would also record the prompt and policy versions, the retrieval corpus version, and evaluation events attaching groundedness and relevance scores.</p>
+<h2 id="telemetry-collection">14.3 Telemetry Collection</h2>
+<p>Collecting telemetry requires instrumentation: code that creates spans, propagates context, and exports data. In agent systems it must also address payload discipline, since prompts and tool results are large and sensitive.</p>
+<h3 id="instrumentation-approaches">14.3.1 Instrumentation Approaches</h3>
+<p><em>Manual instrumentation</em> offers maximum control:</p>
+<pre><code>with tracer.start_as_current_span(&quot;execute_tool&quot;) as span:
+    span.set_attribute(&quot;gen_ai.tool.name&quot;, tool_name)
+    result = tool.execute(args)
+    span.set_attribute(&quot;gen_ai.tool.call.result&quot;, result)</code></pre>
+<p>Its failure modes are inconsistent attribute names and types that break queries, missing spans from developer omission, and excessive payload capture. <em>Auto-instrumentation</em> reduces the burden, as in <code>OpenAIInstrumentor().instrument()</code>, which traces every call to that client; it gives rapid coverage and may omit domain-specific context such as plan steps and policy decisions, and it risks capturing more than intended. <em>Framework-native instrumentation</em>, such as LangSmith for LangChain, gives the richest semantics at the cost of lock-in. A practical hybrid uses auto-instrumentation for common libraries (model clients, HTTP, databases, vector stores), adds manual spans at semantic boundaries (plan step, tool gate, policy engine), and enforces a schema registry for attribute names.</p>
+<h3 id="the-opentelemetry-pipeline">14.3.2 The OpenTelemetry Pipeline</h3>
+<p>OpenTelemetry defines a standard pipeline, shown in Figure <a href="#fig:otel-pipeline">14.2</a>: application, SDK, processor, exporter, collector, backend.</p>
+<figure id="fig:otel-pipeline">
+<img src="figures/14-trace-semantics-and-agent-telemetry-fig2-9515190ff7.png" />
+<figcaption><strong>Figure 14.2.</strong> The OpenTelemetry pipeline. Sensitive transformations belong in the collector, which is centralized and auditable, rather than only in application code, which is heterogeneous.</figcaption>
+</figure>
+<p>The SDK manages span lifecycle, context propagation, attribute typing, and batching and sampling hooks. Processors operate on the stream: a batch processor reduces overhead, a sampling processor reduces volume, a redaction processor removes sensitive fields, and an enrichment processor adds deployment metadata such as region, build, and prompt version. Exporters send telemetry, with OTLP as the default. The collector centralizes policy, fanning out to backends and enforcing organization-wide sampling and redaction. Backends store and query, with different backends for different pillars. The key operational pattern is to perform sensitive transformations in the collector rather than only in application code.</p>
+<h3 id="genai-specific-telemetry">14.3.3 GenAI-Specific Telemetry</h3>
+<p>Generative workloads introduce requirements that standard tracing did not anticipate [<a href="#ref-otelgenai2025">9</a>]. <em>Large payloads</em>: prompts, retrieved documents, and tool results can be megabytes, and span attributes were not designed for that, so store small summaries (lengths, hashes, identifiers) as attributes, attach larger content as events only when sampled or on error, and keep full content in secured blob storage referenced by an opaque identifier. <em>Streaming responses</em>: represent the whole generation as one span and add events for time to first token, tokens per second, and interruption or truncation, avoiding per-token events in production. <em>Multi-turn conversations</em>: link traces with <code>gen_ai.conversation.id</code> and <code>session.id</code>, and record the turn index to analyze drift within a conversation. <em>Cost attribution</em>: record input and output tokens on every model span, tool billing units on tool spans, and retries explicitly, so that multiplicative cost is visible. <em>Content capture</em>: debugging sometimes requires prompt and response capture, and it must be opt-in and access-controlled; an environment switch such as <code>OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT</code> is a useful operational control, and enterprise practice adds per-tenant and per-endpoint capture policies, automatic redaction, and role-based access to stored content.</p>
+<h2 id="metrics-for-agent-systems">14.4 Metrics for Agent Systems</h2>
+<p>Metrics provide aggregate views. They are the fastest signal for detection and the most scalable for trends.</p>
+<h3 id="core-metrics">14.4.1 Core Metrics</h3>
+<p>A minimal metric set covers requests, cost, and quality. Request metrics are <code>gen_ai.client.operation.duration</code> (a latency histogram by operation type), <code>gen_ai.client.operation.count</code> (a counter by status), and <code>gen_ai.client.token.usage</code> (counters for input and output tokens). Cost metrics are the total, the per-request histogram, and the breakdown by model. Quality metrics are the evaluation-score distributions for groundedness, relevance, and correctness, the error rate by failure class (timeouts, policy denials, tool failures), and the retry count per request. Agent systems need two further families: tool-utilization metrics (calls, latency, and error rate per tool, and fan-out per request) and control-plane metrics (policy decisions, sandbox blocks, human approval latency and rate). The last family matters because many agent incidents are policy-related rather than infrastructure-related.</p>
+<h3 id="latency-analysis">14.4.2 Latency Analysis</h3>
+<p>Agent latency decomposes as <span class="math display">\[T_{\text{total}} = T_{\text{queue}} + T_{\text{model}} + T_{\text{tool}} + T_{\text{network}} + T_{\text{processing}},\]</span> covering waiting for capacity, inference including the streaming tail, tool execution including remote latency, transport overhead (TLS, retries, DNS), and in-process work (prompt assembly, parsing, ranking, formatting). Traces give the exact decomposition per request; metrics give distributions over time. The 99th-percentile latency is usually dominated by tail phenomena: transient tool slowness, provider throttling, large contexts slowing generation, and queueing cascades under load. Capturing queue time and retry backoff in spans is therefore essential; without it, latency is misattributed to the model.</p>
+<h3 id="token-economics">14.4.3 Token Economics</h3>
+<p>Token consumption drives both cost and latency, and token metrics should answer whether prompts are bloated by excess context, whether retrieval results are too large, whether retries repeat identical prompts, and which endpoints or user segments drive cost. Three derived quantities help. <em>Token efficiency</em>, output tokens over input tokens, is a diagnostic: very low values suggest bloated context or verbose system prompts, and very high values suggest insufficient grounding. <em>Context utilization</em>, tokens used over the window size, warns of truncation at the high end and wasted budget at the low end. <em>Unit cost</em>, total cost over successful outcomes, forces retries and failures into the accounting and is often the most honest cost metric; a system that works eventually may have a catastrophic unit cost.</p>
+<h2 id="causality-and-attribution">14.5 Causality and Attribution</h2>
+<p>Observability earns its cost when it supports causal diagnosis: what caused a failure and what would have prevented it, beyond what happened.</p>
+<p>For agents there is a specific reason this is hard. The step where an error <em>surfaces</em> is usually not the step that <em>caused</em> it. A wrong answer at step 30 traces back to a document misranked at step 4, and everything between is locally reasonable inference from a bad premise. Figure <a href="#fig:error-origin">14.3</a> shows the pattern. Latency attribution is a solved problem borrowed from distributed tracing; failure attribution is an active research area.</p>
+<figure id="fig:error-origin">
+<img src="figures/14-trace-semantics-and-agent-telemetry-fig3-da4522ed5e.png" />
+<figcaption><strong>Figure 14.3.</strong> Error origin and error surface. The failure appears at step 30; the decisive mistake occurred at step 4. A method that inspects the failing step in isolation attributes the failure to the wrong place.</figcaption>
+</figure>
+<h3 id="causal-chains">14.5.1 Causal Chains</h3>
+<p>Agent behavior forms causal chains: a user query leads to query understanding (a model call), which leads to a retrieval decision, which leads to a vector search (a tool call), which leads to document ranking, which leads to answer generation. Traces encode this through parent–child relations and links, and causal semantics require discipline. Any point where the agent selects among alternatives (tool A or B, retry or abort, retrieve or answer directly) should be represented explicitly as a span or an event; without this one cannot diagnose <em>why</em> a path was taken. And the state that influenced a decision (retrieved document identifiers, tool response fingerprints) should be stored as stable references, so that the decision can be reconstructed.</p>
+<h3 id="attribution-analysis">14.5.2 Attribution Analysis</h3>
+<p><em>Latency attribution</em> uses self-time against child-time: a span’s self-time is its duration minus the sum of its children’s durations, and large self-time indicates prompt assembly and serialization overhead, synchronous waiting not represented as a child span, or framework overhead. If self-time is always near zero, the instrumentation is too coarse and hides local work.</p>
+<p><em>Cost attribution</em> reads token usage from model spans and billing units from tool spans, and identifies the optimization targets: reduce input tokens through context trimming and retrieval compression, reduce the number of model calls through plan efficiency, replace an expensive model with a cheaper one where safe, and cache stable results such as embeddings and retrieval.</p>
+<p><em>Error attribution</em> cannot use “first error span wins.” The first error is often a downstream manifestation (answer generation failed because the context overflowed) and the contributing cause is upstream (retrieval returned too many documents). Error attribution should capture the primary error span on the critical path, the contributing spans (largest token and latency contributors), and the policy decisions that altered behavior.</p>
+<h3 id="counterfactual-analysis">14.5.3 Counterfactual Analysis</h3>
+<p>With trace structure and attribution in place, counterfactual questions become answerable. <em>Model substitution</em>: replace <span class="math inline">\(T_{\text{model}}\)</span> with baseline latencies for another model, replace cost using its pricing, and estimate the quality effect from offline evaluation. <em>Context reduction</em>: reduce input tokens by 30%, predict the latency decrease, and evaluate whether quality would degrade. <em>Retrieval variation</em>: replay the trace with different retrieval results and compare outcomes, to determine whether a failure is retrieval-driven or generation-driven. Counterfactuals require replayable inputs (identifiers, hashes, stable references) and versioned configurations (prompt, policy, and model hashes).</p>
+<h3 id="failure-attribution">14.5.4 Failure Attribution</h3>
+<p>Latency attribution divides a duration among spans, and arithmetic settles it. Failure attribution asks which agent and which step is <em>responsible</em> for a wrong outcome, and nothing about it is arithmetic. The task became a defined research problem over the past year, complete with a benchmark. <em>Seeing the Whole Elephant</em> formalizes it for multi-agent systems and measures how well existing methods identify the responsible agent and the decisive step [<a href="#ref-wholeelephant2026">24</a>]. The headline finding is the one from Figure <a href="#fig:error-origin">14.3</a>: error surfacing and error origin are frequently many steps apart, and methods that inspect the failing step in isolation attribute badly.</p>
+<p>Several families of approach have emerged. <em>Temporal-semantic search</em> treats the trajectory as a sequence and looks for the step where the semantic state diverged from a correct one; StepFinder locates the decisive step this way [<a href="#ref-stepfinder2026">21</a>], and TRAJDEBUG traces an error’s lifecycle from introduction through amplification to manifestation [<a href="#ref-trajdebug2026">22</a>]. <em>Dependency and influence structure</em> uses the causal graph rather than the time order; dependency-guided search prunes candidate causes by following data dependencies [<a href="#ref-falat2026">14</a>], adaptive influence graphs weight how strongly each step influenced the outcome [<a href="#ref-influencegraph2026">16</a>], and causal graph tracing has been applied to root-cause analysis in deployed multi-agent systems [<a href="#ref-agenttracecausal2026">13</a>]. <em>Hypothesis verification</em> generates candidate explanations and tests them rather than classifying the trace in one pass; VerifyMAS takes this approach [<a href="#ref-verifymas2026">23</a>]. <em>Learned attribution</em> trains a model on annotated failed runs; AgentRx releases a benchmark of manually annotated failures [<a href="#ref-agentrx2026">11</a>], and lightweight graph neural networks over the trajectory graph are competitive with model-based reasoning at a fraction of the cost [<a href="#ref-gnnattrib2026">15</a>].</p>
+<p>The engineering implication is what matters. Every one of these methods consumes the trace, and each needs specific structure: explicit decision-boundary events, stable references to the evidence each decision consulted, and inter-agent message edges. A trace that records only spans and durations supports latency attribution and none of this. The rules stated above, decision boundaries as first-class events and inputs stored as stable references, are the difference between a system where failure attribution is a tooling choice and one where it is impossible in principle.</p>
+<h3 id="silent-failure">14.5.5 Silent Failure</h3>
+<p>The failures that hurt most are the ones nothing reports. A longitudinal study of a production agent runtime catalogs <em>silent</em> failures: runs that complete, return plausible output, raise no error, and are wrong [<a href="#ref-silentfail2026">20</a>]. Operational monitoring is blind to these by construction, because every signal it watches, error rate, latency, exit code, is green.</p>
+<p>Detecting them requires signals derived from the trace’s semantic content rather than its operational envelope: attribution failures in which an output claim has no supporting evidence in the retrieved set, gate decisions inconsistent with comparable past cases, tool results discarded without being read, and trajectories that revisit a state they already visited. None of these is an error; all of them are evidence. Chapter <a href="15-evaluation-stability-cost-and-behavioral-fidelity.html#ch:evaluation">15</a> takes up measurement of this class. The observability requirement is that the trace record enough semantics to compute such signals offline, which is a schema decision made long before the incident.</p>
+<h3 id="tooling">14.5.6 Tooling</h3>
+<p>Practical toolkits have begun to consolidate these ideas: open-source observability with attribution and recovery support [<a href="#ref-agentdebugx2026">10</a>], structured logging frameworks designed for agent auditability [<a href="#ref-agenttrace2026">12</a>], OpenTelemetry-based instrumentation with fault injection so that attribution methods can be tested against known-injected faults [<a href="#ref-otelmas2026">18</a>], and corpus-level diagnostics that surface systematic problems across many traces rather than debugging one at a time [<a href="#ref-insights2026">17</a>]. The last category deserves emphasis. Most debugging effort goes into single traces, and most <em>value</em> is in the aggregate: a failure mode occurring in 3% of runs is invisible one trace at a time and obvious across ten thousand. Corpus-level diagnostics is where observability stops being forensics and becomes engineering. A related survey covers evidence tracing and execution provenance more broadly [<a href="#ref-provenance2026">19</a>], which is the right framing for regulated deployment: what the agent did, what evidence it relied on, and whether that evidence supports the conclusion.</p>
+<h2 id="agent-debugging">14.6 Agent Debugging</h2>
+<p>Debugging an agent consists of isolating semantic failures, reconstructing why a decision path was taken, and controlling what the investigation costs.</p>
+<h3 id="failure-taxonomy">14.6.1 Failure Taxonomy</h3>
+<p><em>Operational failures</em> are API errors (rate limits, timeouts, unavailability), tool failures (external service down, schema mismatch, invalid inputs), and resource exhaustion (context overflow, memory limits); they are diagnosed from span status, exception events, error codes, and retry patterns. <em>Semantic failures</em> are wrong answers (incorrect, off-topic, hallucinated), policy-violating output (unsafe, leaking data), and incoherent or incomplete output; they are diagnosed from evaluation events, human feedback, and content inspection under access control. <em>Efficiency failures</em> are excessive retries and backoff loops, unnecessary tool calls, repeated retrieval with identical queries, and bloated prompts; they are diagnosed from token and tool metrics, trace fan-out, and repeated span patterns. A common production incident is <em>efficiency collapse</em>, in which the system remains correct and becomes too expensive or too slow through retries or prompt growth; traces are essential to see it.</p>
+<h3 id="debugging-workflow">14.6.2 Debugging Workflow</h3>
+<p>A disciplined workflow prevents thrash. <em>Detect</em>: a metric triggers an alert (error spike, latency regression, cost surge, quality drop). <em>Localize</em>: retrieve representative traces, filtered by time window and endpoint, separated by status, stratified by evaluation-score bin, and compared against a healthy baseline window. <em>Examine</em>: inspect trace structure for common critical paths, repeated patterns (retry loops, tool fan-out), and changes in prompt, policy, or model version. <em>Diagnose</em>: use attribution to find which spans explain the latency or cost increase and which attributes correlate with low quality. <em>Fix</em>: apply targeted changes (adjust retrieval, tighten prompts, add caching, add guardrails against pathological loops). <em>Verify</em>: deploy, then confirm the metric improvement, the expected change in trace structure, and stable or improved quality.</p>
+<h3 id="evaluation-integration">14.6.3 Evaluation Integration</h3>
+<p>Observability must include quality signals, or the system will be optimized for cost and latency while quality silently degrades. A common pattern attaches evaluation results as span events [<a href="#ref-otelgenai2025">9</a>]:</p>
+<pre><code>Event {
+    name: &quot;gen_ai.evaluation.result&quot;,
+    attributes: {
+        &quot;gen_ai.evaluation.metric&quot;: &quot;groundedness&quot;,
+        &quot;gen_ai.evaluation.score&quot;: 0.85,
+        &quot;gen_ai.evaluation.score.label&quot;: &quot;good&quot;
+    }
+}</code></pre>
+<p>Evaluation events enable correlation of quality with trace attributes (prompt version, retrieval corpus), automated tail sampling of low-quality traces, alerting on quality regression, and targeted debugging of semantic failures. Evaluation should be staged: inline lightweight checks (citation presence, length bounds), asynchronous deeper evaluation (a model judge or retrieval-grounded check), and periodic human review to calibrate the evaluator.</p>
+<h2 id="observability-architecture">14.7 Observability Architecture</h2>
+<p>Observability is an architecture rather than a set of instrumentation calls. It governs how data flows, how it is sampled, how it is secured, and how it is queried.</p>
+<h3 id="collection-architecture">14.7.1 Collection Architecture</h3>
+<p>The architecture follows the OpenTelemetry pipeline of Figure <a href="#fig:otel-pipeline">14.2</a>: instrumented model calls, tool calls, the agent loop, and framework logic feed an SDK, which exports over OTLP to a collector with receivers, processors, and exporters, which fans out to a trace backend, a metrics backend, and a log or object store. Two requirements are specific to agents. Captured prompts and responses must be stored in a secure data plane with stricter access control than general telemetry. And the trace must record enough provenance (prompt version, policy version, tool versions) to reproduce and compare behavior across deployments.</p>
+<h3 id="sampling-strategies">14.7.2 Sampling Strategies</h3>
+<p>Full capture is often impractical. <em>Head-based sampling</em> decides at trace start; it is simple, cheap, and consistent across services, and it misses rare events such as semantic failures and adversarial prompts. <em>Tail-based sampling</em> decides after the trace completes, capturing all errors, all high-latency traces, and all low-quality traces, at the cost of buffering and collector complexity. <em>Adaptive sampling</em> raises rates during incidents and canary windows and varies them per endpoint or tenant. For agents, tail-based sampling is typically the most valuable, because errors and low-quality responses are disproportionately important, costs explode on rare pathological traces, and quality regressions appear in a small subset of traffic. A recommended baseline keeps 100% of error traces, 100% of traces with an evaluation score below threshold, and a small uniform sample of successful traces for comparison.</p>
+<h3 id="data-retention">14.7.3 Data Retention</h3>
+<p>Telemetry volume is dominated by high-cardinality traces and any captured content, and retention must balance debugging value, cost, and compliance. Tiered storage keeps hot data (seven days) at high resolution, warm data (thirty days) sampled, and cold data (one year) as aggregates and selected traces. Selective retention keeps all error and low-quality traces, traces for features under rollout, and only aggregates for routine traffic. Compliance requires redaction before long-term storage, encryption at rest, and access logs with chain of custody. A useful principle separates trace metadata from content: keep small metadata (identifiers, durations, counts) longer, and raw content (prompts, documents) shorter and only when strictly needed.</p>
+<h2 id="production-observability">14.8 Production Observability</h2>
+<p>Production observability is the operational surface: dashboards, alerts, and incident response.</p>
+<h3 id="dashboard-design">14.8.1 Dashboard Design</h3>
+<p>Dashboards answer three questions: is the system healthy, is it safe, is it within budget? A health overview shows request rate, error rate, saturation indicators (queue depth, concurrency), latency percentiles by operation type, and tool availability. Cost tracking shows tokens over time by model and endpoint, the cost-per-request distribution, and budget burn-down with projection. Quality monitoring shows evaluation-score distributions and trends, quality by prompt and corpus version, and human feedback with escalation rates. Every panel should support drill-down: a spike in tail latency pivots to representative traces, a quality regression pivots to the lowest-scoring traces, a cost surge pivots to the traces with the highest token usage. A target for enterprise systems [<a href="#ref-guardrails2025">4</a>] is a mean time to detection under five minutes for critical issues, which requires both good metrics and high signal-to-noise alerts.</p>
+<h3 id="alerting">14.8.2 Alerting</h3>
+<p>Alerts must be actionable and low-noise; alert fatigue is itself a failure mode. Error-based alerts fire on error rate above threshold, spikes in specific error classes, and error-budget exhaustion. Latency-based alerts fire on tail latency above the objective, rising queue time as an early warning, and slowness in a particular span type. Cost-based alerts fire on daily cost above budget, rising cost per successful outcome, and unexpected use of an expensive model on a cheap endpoint. Quality-based alerts fire on downward shifts in score distributions, rising negative feedback or escalations, and rising hallucination or policy-violation indicators. A robust alerting system correlates signals: a cost surge with stable token counts suggests a tool-billing change rather than prompt bloat, and a latency surge with stable model time suggests a tool regression.</p>
+<h3 id="incident-response">14.8.3 Incident Response</h3>
+<p>Response should be structured. Triage determines the impact: users, endpoints, and safety or compliance risk. Investigation pulls traces for the affected window, compares them with baseline traces, and uses attribution to identify which spans changed. Mitigation applies a safe rollback or fallback: switch to a fallback model, disable a problematic tool, reduce retrieval depth, or tighten guardrails temporarily. Resolution deploys the permanent fix and verifies it through metrics and trace structure. The postmortem documents what happened, the contributing factors, what caught it, what did not, and which preventive controls will be added. Observability serves learning as much as debugging; without postmortems backed by trace evidence, systems repeat the same incidents.</p>
+<h2 id="worked-example-an-e-commerce-agent">14.9 Worked Example: An E-Commerce Agent</h2>
+<p>Consider an agent that helps customers find products, answer questions, and place orders. The setting is realistic because it combines semantic quality requirements with business metrics (conversion) and operational constraints (inventory correctness).</p>
+<h3 id="telemetry-design">14.9.1 Telemetry Design</h3>
+<p>The trace structure for a session runs <code>invoke_agent</code> shopping_assistant at the root, with children for intent classification (<code>chat</code>), query embedding (<code>embeddings</code>), product search (<code>execute_tool</code>), product recommendation (<code>chat</code>), an inventory check (<code>execute_tool</code>), an availability response (<code>chat</code>), and, on purchase, order creation (<code>execute_tool</code>). Key attributes combine technical and business fields: a pseudonymized customer identifier, the session, the inferred intent category, the product category, the order value if completed, whether the session converted, and the prompt, policy, and tool versions. Metrics connect operations to outcomes: request rate by intent, conversion rate by agent version, cost per session and per conversion, latency by operation, and the empty-search rate (tool result count of zero) as a leading indicator. A specifically useful metric is drop-off localization: the fraction of sessions that stop after product search, after the inventory check, and after the recommendation, which requires linking session-level traces and extracting stage markers.</p>
+<h3 id="debugging-scenario">14.9.2 Debugging Scenario</h3>
+<p><em>Problem.</em> The conversion rate dropped 20% in the last hour, while error rate and latency appear stable. This is a semantic and business failure: operational health signals are fine and outcomes degrade.</p>
+<p><em>Investigation.</em> Filter the last hour’s traces to non-converting sessions. Compare against the previous hour on intent, tool result count, inventory-check latency, and evaluation scores. The comparison shows product search returning empty results 15% more often. Drilling into tool spans, a result count of zero correlates with conversion failure, and the tool attributes show that the query filters changed to a stricter availability filter. The root cause is an inventory update that removed products from the search index or tightened the filters.</p>
+<p><em>Resolution.</em> As immediate mitigation, broaden the search to include out-of-stock items with explicit availability messaging. As the permanent fix, add an alert on the empty-search rate, add canary checks for index freshness, and add a trace attribute capturing the index version. A business regression was diagnosed from trace evidence rather than guesswork, which is the value of observability.</p>
+<h2 id="summary">14.10 Summary</h2>
+<p>Observability turns an agent from a black box into a glass box. Logs explain events, metrics detect aggregate problems, and traces encode causality.</p>
+<p>Traces represent execution as a span graph. The OpenTelemetry GenAI conventions define spans for model calls, agent invocations, tool executions, and embeddings, with attributes for model parameters, token usage, tool outcomes, and configuration provenance. Collection requires instrumentation integrated into a pipeline of SDK, processor, exporter, collector, and backend, with payload discipline: summaries and references rather than raw megabyte prompts, and redaction and access control enforced centrally.</p>
+<p>Metrics track latency decomposition, token economics, tool utilization, cost per outcome, and quality signals. Attribution assigns latency, cost, and errors to spans; counterfactual analysis becomes possible when traces capture replayable references and configuration hashes. Failure attribution is harder than latency attribution because the origin of an error and its surface are usually far apart, and the methods that solve it need decision-boundary events, stable evidence references, and inter-agent edges in the trace. Silent failures require semantic signals that operational monitoring cannot see.</p>
+<p>Production observability requires dashboards, actionable alerts, and incident procedures, with sampling and retention that preserve the traces that matter. The unifying principle is to instrument everything, capture selectively, secure content, and preserve causality. An observable agent is a debuggable agent, and a debuggable agent is one that can be made reliable.</p>
+<h2 id="common-misunderstandings">14.11 Common Misunderstandings</h2>
+<p><em>Logs are sufficient for debugging.</em> Logs describe events and do not encode causal structure. Without traces, correlating tool calls and model calls is manual and error-prone.</p>
+<p><em>Everything should be captured.</em> Full content capture creates volume and privacy risk. Always capture metadata; capture full content only for sampled traces, errors, or approved debugging sessions.</p>
+<p><em>Metrics tell the whole story.</em> Metrics hide the tail. A 99% success rate still produces thousands of failures at scale, and traces explain the 1%.</p>
+<p><em>Operational health implies correctness.</em> Latency and error metrics do not measure correctness. Integrate evaluation and feedback into telemetry.</p>
+<p><em>Observability is overhead.</em> With batching, sampling, and payload discipline, overhead is low, and the cost of debugging without telemetry is almost always higher.</p>
+<p><em>More alerts mean more safety.</em> Alert fatigue causes humans to ignore alerts. Tune them and route them to the right on-call with runbooks.</p>
+<p><em>Standard distributed tracing suffices for agents.</em> Agents require GenAI-specific semantics: token usage, prompt versions, tool argument and result discipline, evaluation events, and conversation linkage.</p>
+<p><em>Redaction can happen later.</em> Traces may contain personal data, credentials, or proprietary content. Redact before export, ideally in the collector, under auditable policy.</p>
+<h2 class="unnumbered" id="exercises">Exercises</h2>
+<ol>
+<li><p><strong>Trace design.</strong> Design the trace structure for a multi-agent system with a coordinator that routes requests, specialist agents for different domains, and shared tool access. What spans are needed, and what attributes capture the multi-agent dynamics?</p></li>
+<li><p><strong>Cost attribution.</strong> An agent makes five model calls with (input, output) token counts of (100, 50), (500, 200), (2000, 100), (200, 150), and (300, 100). At $0.01 per 1K input tokens and $0.03 per 1K output tokens, calculate the total cost, the cost per call, which call is most expensive, and which optimization would reduce cost most.</p></li>
+<li><p><strong>Sampling strategy.</strong> An agent handles 10<span>,</span>000 requests per day: 99% succeed, 0.5% fail with errors, and 0.5% have low quality scores. Design a sampling strategy that captures all error traces, all low-quality traces, and 1% of successful traces. How many traces per day are retained?</p></li>
+<li><p><strong>Dashboard design.</strong> Design an observability dashboard for a customer-service agent. What metrics are prominent, what drill-downs are needed, and what alerts would you configure?</p></li>
+<li><p><strong>Debugging exercise.</strong> Tail latency increased by 50% while error rate, token consumption, and quality scores are unchanged. What hypotheses would you investigate, what trace queries would you run, and what would you look for in the affected traces?</p></li>
+<li><p><strong>Attribution readiness.</strong> Take a trace schema you use and check it against the three requirements for failure attribution: decision-boundary events, stable evidence references, and inter-agent edges. Which are missing, and what would each cost to add?</p></li>
+</ol>
+<h2 class="unnumbered" id="bibliographic-notes">Bibliographic Notes</h2>
+<p>OpenTelemetry provides the foundation for modern observability [<a href="#ref-otel2025">7</a>]. The GenAI semantic conventions extend it for language-model workloads, with agent-specific spans [<a href="#ref-otelgenai2025">9</a>]. OpenLLMetry [<a href="#ref-openllmetry2025">6</a>] provides open-source instrumentation for model providers and vector databases. Commercial platforms including Datadog, LangSmith, Arize, and Weights &amp; Biases Weave offer integrated tracing, evaluation, and monitoring; Datadog’s native support for the GenAI conventions demonstrates industry adoption [<a href="#ref-datadoggenai2025">2</a>].</p>
+<p>The observability landscape for agents is surveyed in [<a href="#ref-llmobs2025">5</a>], and best practices are discussed in the OpenTelemetry blog [<a href="#ref-otelagent2025">8</a>]. Distributed tracing originates with Dapper [<a href="#ref-dapper2010">1</a>] and Zipkin. The USE method for system analysis is due to Gregg [<a href="#ref-gregg2013">3</a>].</p>
+<h2 class="unnumbered" id="bibliography">Bibliography</h2>
+<ol>
+<li><div id="ref-dapper2010">
+
+</div>
+<p>B. H. Sigelman, L. A. Barroso, M. Burrows, et al. Dapper, a Large-Scale Distributed Systems Tracing Infrastructure. Technical Report, Google, 2010.</p></li>
+<li><div id="ref-datadoggenai2025">
+
+</div>
+<p>Datadog. LLM Observability Natively Supports OpenTelemetry GenAI Semantic Conventions. Blog post, 2025.</p></li>
+<li><div id="ref-gregg2013">
+
+</div>
+<p>B. Gregg. Systems Performance: Enterprise and the Cloud. Prentice Hall, 2013.</p></li>
+<li><div id="ref-guardrails2025">
+
+</div>
+<p>AI Guardrails Guide. AI Guardrails: Enforcing Safety Without Slowing Innovation. <span><em>Obsidian Security</em></span>, 2025.</p></li>
+<li><div id="ref-llmobs2025">
+
+</div>
+<p>LLM Observability Survey. Top LLM Observability Tools in 2025. <span><em>Logz.io</em></span>, 2025.</p></li>
+<li><div id="ref-openllmetry2025">
+
+</div>
+<p>Traceloop. OpenLLMetry: Open-Source Observability for GenAI. GitHub, 2025.</p></li>
+<li><div id="ref-otel2025">
+
+</div>
+<p>OpenTelemetry. OpenTelemetry Specification. Documentation, 2025.</p></li>
+<li><div id="ref-otelagent2025">
+
+</div>
+<p>OpenTelemetry. AI Agent Observability: Evolving Standards and Best Practices. Blog post, 2025.</p></li>
+<li><div id="ref-otelgenai2025">
+
+</div>
+<p>OpenTelemetry. Semantic Conventions for Generative AI Systems. Documentation, 2025.</p></li>
+<li><div id="ref-agentdebugx2026">
+
+</div>
+<p>Kunlun Zhu et al. “AgentDebugX: An Open-Source Toolkit for Failure Observability, Attribution, and Recovery in LLM Agents.” arXiv:2607.18754, 2026.</p></li>
+<li><div id="ref-agentrx2026">
+
+</div>
+<p>Shraddha Barke et al. “AgentRx: Diagnosing AI Agent Failures from Execution Trajectories.” arXiv:2602.02475, 2026. EMNLP.</p></li>
+<li><div id="ref-agenttrace2026">
+
+</div>
+<p>Adam AlSayyad et al. “AgentTrace: A Structured Logging Framework for Agent System Observability.” arXiv:2602.10133, 2026. AAAI 2026.</p></li>
+<li><div id="ref-agenttracecausal2026">
+
+</div>
+<p>Zhaohui Geoffrey Wang. “AgentTrace: Causal Graph Tracing for Root Cause Analysis in Deployed Multi-Agent Systems.” arXiv:2603.14688, 2026. ICLR 2026.</p></li>
+<li><div id="ref-falat2026">
+
+</div>
+<p>Md Nakhla Rafi et al. “FALAT: Tracing Failures in LLM Agent Trajectories via Dependency-Guided Search.” arXiv:2606.00765, 2026.</p></li>
+<li><div id="ref-gnnattrib2026">
+
+</div>
+<p>Ting-Wei Li et al. “Beyond LLM-Based Reasoning: Lightweight GNNs for Agent Failure Attribution.” arXiv:2608.18575, 2026.</p></li>
+<li><div id="ref-influencegraph2026">
+
+</div>
+<p>Yarden Bakish et al. “Adaptive Influence Graphs for Failure Attribution in Multi-Agent Systems.” arXiv:2608.24361, 2026.</p></li>
+<li><div id="ref-insights2026">
+
+</div>
+<p>Akshay Manglik et al. “Insights Generator: Systematic Corpus-Level Trace Diagnostics for LLM Agents.” arXiv:2605.21347, 2026.</p></li>
+<li><div id="ref-otelmas2026">
+
+</div>
+<p>Zahra Seyedghorban et al. “Observability and Fault Injection for LLM-Based Multi-Agent Systems in Software Engineering.” arXiv:2608.24271, 2026.</p></li>
+<li><div id="ref-provenance2026">
+
+</div>
+<p>Yiqi Wang et al. “From Agent Traces to Trust: A Survey of Evidence Tracing and Execution Provenance in LLM Agents.” arXiv:2606.04990, 2026.</p></li>
+<li><div id="ref-silentfail2026">
+
+</div>
+<p>Wei Wu. “When Errors Become Narratives: A Longitudinal Taxonomy of Silent Failures in a Production LLM Agent Runtime.” arXiv:2606.14589, 2026.</p></li>
+<li><div id="ref-stepfinder2026">
+
+</div>
+<p>Taiyu Zhu et al. “StepFinder: A Temporal Semantic Framework for Failure Attribution in Multi-Agent Systems.” arXiv:2606.03467, 2026. KDD 2026.</p></li>
+<li><div id="ref-trajdebug2026">
+
+</div>
+<p>Yunjia Qi et al. “TRAJDEBUG: Tracing Error Lifecycle to Identify Critical Failures in Long-Horizon Agent Trajectories.” arXiv:2608.06346, 2026.</p></li>
+<li><div id="ref-verifymas2026">
+
+</div>
+<p>Hezhe Qiao et al. “VerifyMAS: Hypothesis Verification for Failure Attribution in LLM Multi-Agent Systems.” arXiv:2605.17467, 2026.</p></li>
+<li><div id="ref-wholeelephant2026">
+
+</div>
+<p>Mengzhuo Chen et al. “Seeing the Whole Elephant: A Benchmark for Failure Attribution in LLM-based Multi-Agent Systems.” arXiv:2604.22708, 2026. ACL 2026.</p></li>
+</ol>
+
+<div id="bottom"><a href="13-alignment-policies-and-constraint-enforcement.html" rel="prev">&laquo; Alignment, Policies, and Constraint Enforcement</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="15-evaluation-stability-cost-and-behavioral-fidelity.html" rel="next">Evaluation: Stability, Cost, and Behavioral Fidelity &raquo;</a><br>&copy; 2026 Madhava Gaikwad. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
+</div>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</body>
+</html>

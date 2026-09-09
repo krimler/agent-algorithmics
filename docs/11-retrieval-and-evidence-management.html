@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 11: Retrieval and Evidence Management — Agent Algorithmics</title>
+<meta name="description" content="Agents that reason from knowledge must retrieve that knowledge. A language model’s parameters encode statistical regularities learned during training, and…">
+<meta name="author" content="Madhava Gaikwad">
+<meta name="robots" content="index,follow">
+<meta property="og:type" content="book">
+<meta property="og:title" content="Chapter 11: Retrieval and Evidence Management — Agent Algorithmics">
+<meta property="og:description" content="Agents that reason from knowledge must retrieve that knowledge. A language model’s parameters encode statistical regularities learned during training, and…">
+<meta property="og:url" content="https://krimler.github.io/agent-algorithmics/11-retrieval-and-evidence-management.html">
+<link rel="canonical" href="https://krimler.github.io/agent-algorithmics/11-retrieval-and-evidence-management.html">
+<link rel="stylesheet" href="style.css">
+<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Retrieval and Evidence Management", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 11, "url": "https://krimler.github.io/agent-algorithmics/11-retrieval-and-evidence-management.html"}</script>
+
+</head>
+<body>
+<div id="page">
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="10-memory-state-and-forgetting.html" rel="prev">&laquo; Memory, State, and Forgetting</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="12-capability-boundaries-and-secure-tool-use.html" rel="next">Capability Boundaries and Secure Tool Use &raquo;</a></div>
+<h1 id="ch:retrieval"><span class="part">Part II: Control and Commitment</span>Chapter 11. Retrieval and Evidence Management</h1><p>Agents that reason from knowledge must retrieve that knowledge. A language model’s parameters encode statistical regularities learned during training, and those parameters are static: they cannot incorporate new facts, reflect organizational knowledge, or respond to events that occurred after training. Retrieval compensates for this by allowing an agent to condition its reasoning on external evidence.</p>
+<p>Retrieval is often conflated with search, and the conflation is expensive. A search engine serves a human who will browse, skim, discard, and interpret. Ten links is a good answer because the reader does the filtering. An agent does no filtering worth the name: whatever is retrieved enters its context and competes for attention with everything else there. Ten documents where two were needed is eight documents’ worth of distraction, paid for on every subsequent call.</p>
+<p>The success criterion therefore moves. Retrieval works when the final answer improves. Documents that look relevant, score well, and change nothing are a cost with no benefit, and the standard retrieval metrics will report them as a success. Search engines optimize for diversity, freshness, and engagement; retrieval systems must optimize for precision under tight context and latency constraints. Documents that are useful for a human to read may be actively harmful when injected wholesale into a model’s context, where irrelevant text dilutes attention and raises the risk of hallucination.</p>
+<p>This chapter treats retrieval as a systems problem: latency and throughput by analogy to memory systems, indexing and chunking as space-for-speed trades, and evidence management as the work of turning documents into usable context. The guiding assumption is that retrieval is a first-class subsystem whose design determines correctness. A vector store bolted onto an agent is a component that can inject adversarial text into the agent’s reasoning (Chapter <a href="12-capability-boundaries-and-secure-tool-use.html#ch:capability">12</a>), compound errors across hops, and consume the budget that was meant to fund the answer.</p>
+<h2 id="the-retrieval-problem">11.1 The Retrieval Problem</h2>
+<p>Retrieval answers a constrained question: given a query <span class="math inline">\(q\)</span> and a corpus <span class="math inline">\(\mathcal{C}\)</span>, which pieces of information should be brought into the agent’s working context?</p>
+<p>Formally, let <span class="math inline">\(\mathcal{C} = \{d_1, \ldots, d_n\}\)</span> be a corpus of documents. A retrieval function maps a query to a ranked subset, <span class="math display">\[R(q, \mathcal{C}) = \text{top-}k_{d \in \mathcal{C}} \, s(q,d),\]</span> where <span class="math inline">\(s(q,d)\)</span> is a relevance score. In isolation this is the classical information-retrieval problem. The difference lies in the objective. For agents, retrieval quality is instrumental. Let <span class="math inline">\(T(q, D)\)</span> be the downstream task performance when query <span class="math inline">\(q\)</span> is answered using retrieved documents <span class="math inline">\(D\)</span>. The system objective is <span class="math display">\[\max_{R} \; \mathbb{E}_{q \sim Q}\left[ T(q, R(q, \mathcal{C})) \right].\]</span> This formulation makes an important fact explicit. Higher retrieval scores are irrelevant unless they improve task outcomes. A document that is relevant by lexical or semantic measures and distracts the model harms performance; a document that scores modestly may be invaluable if it anchors the agent’s reasoning.</p>
+<h3 id="retrieval-as-memory-access">11.1.1 Retrieval as Memory Access</h3>
+<p>Retrieval behaves like memory access in a computer system. The corpus is backing storage; the context window is fast, limited working memory; each retrieval incurs latency and consumes bandwidth by injecting tokens into context.</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Memory-system concept</th>
+<th style="text-align: left;">Retrieval analogue</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Memory access time</td>
+<td style="text-align: left;">Query latency</td>
+</tr>
+<tr>
+<td style="text-align: left;">Memory bandwidth</td>
+<td style="text-align: left;">Documents injected per second</td>
+</tr>
+<tr>
+<td style="text-align: left;">Cache hit</td>
+<td style="text-align: left;">Query answered from cached or indexed data</td>
+</tr>
+<tr>
+<td style="text-align: left;">Cache miss</td>
+<td style="text-align: left;">Requires expensive search or external access</td>
+</tr>
+<tr>
+<td style="text-align: left;">Working set</td>
+<td style="text-align: left;">Documents relevant to the current task</td>
+</tr>
+<tr>
+<td style="text-align: left;">Locality of reference</td>
+<td style="text-align: left;">Similar queries over time</td>
+</tr>
+<tr>
+<td style="text-align: left;">Prefetching</td>
+<td style="text-align: left;">Anticipatory retrieval</td>
+</tr>
+<tr>
+<td style="text-align: left;">Cache invalidation</td>
+<td style="text-align: left;">Corpus updates</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The analogy guides optimization. Indexing reduces access latency as caches reduce memory access time. Query locality enables batching and reuse. Prefetching retrieves documents likely to be needed in subsequent steps. Corpus updates require invalidation to prevent stale evidence.</p>
+<h3 id="the-rag-architecture">11.1.2 The RAG Architecture</h3>
+<p>Retrieval-augmented generation (RAG) [<a href="#ref-lewis2020rag">11</a>] integrates retrieval with inference. The canonical pipeline, shown in Figure <a href="#fig:rag-pipeline">11.1</a>, has four stages: <em>index</em> the corpus into retrievable representations, <em>retrieve</em> the <span class="math inline">\(k\)</span> most relevant documents for a query, <em>augment</em> the model’s context with the retrieved content, and <em>generate</em> an answer grounded in that evidence.</p>
+<figure id="fig:rag-pipeline">
+<img src="figures/11-retrieval-and-evidence-management-fig1-203ac5ff72.png" />
+<figcaption><strong>Figure 11.1.</strong> The retrieval-augmented generation pipeline, with the characteristic failure of each stage. A wrong answer at the end can originate at any of the four.</figcaption>
+</figure>
+<p>RAG addresses the basic limitation of parametric knowledge. Rather than increasing model size to memorize more facts, it externalizes knowledge and supplies it on demand, which allows access to current information, proprietary data, and domain knowledge without retraining. RAG systems have evolved beyond single-shot retrieval: advanced pipelines add query rewriting, reranking, and iterative refinement; modular RAG decomposes the pipeline into interchangeable components; and agentic RAG [<a href="#ref-agenticrag2025">1</a>] introduces autonomous decisions over when and how to retrieve, adapting retrieval depth to task complexity.</p>
+<h2 id="retrieval-methods">11.2 Retrieval Methods</h2>
+<p>Retrieval methods differ in what signal they treat as evidence of relevance. Sparse methods use lexical overlap. Dense methods use semantic similarity. Hybrid methods combine both, acknowledging that neither signal dominates universally.</p>
+<h3 id="sparse-retrieval-bm25-and-keyword-matching">11.2.1 Sparse Retrieval: BM25 and Keyword Matching</h3>
+<p>Sparse retrieval operates in token space. Relevance is inferred from terms shared between query and document, weighted by term importance. The dominant algorithm is BM25, <span class="math display">\[\text{BM25}(q, d) = \sum_{t \in q} \text{IDF}(t) \cdot \frac{f(t, d)(k_1 + 1)}{f(t, d) + k_1\left(1 - b + b \cdot \frac{|d|}{\text{avgdl}}\right)},\]</span> where <span class="math inline">\(f(t,d)\)</span> is the frequency of term <span class="math inline">\(t\)</span> in document <span class="math inline">\(d\)</span>, <span class="math inline">\(\text{IDF}(t)\)</span> weights rare terms more heavily, and <span class="math inline">\(k_1\)</span> and <span class="math inline">\(b\)</span> are tuning constants. Sparse retrieval excels at exact matching. Rare terms receive high weight through inverse document frequency, which makes sparse methods effective for technical identifiers, error codes, and proper nouns, and inverted indices deliver sub-linear retrieval with predictable latency. The weakness is the lexical gap: queries and documents that share meaning but not vocabulary fail to match, which becomes acute with conversational queries, paraphrase, and cross-domain terminology.</p>
+<h3 id="dense-retrieval-embeddings-and-semantic-search">11.2.2 Dense Retrieval: Embeddings and Semantic Search</h3>
+<p>Dense retrieval embeds queries and documents into a shared vector space and computes relevance as similarity, <span class="math display">\[s(q,d) = \frac{E_q(q) \cdot E_d(d)}{\|E_q(q)\| \cdot \|E_d(d)\|}.\]</span> It captures semantic similarity, enabling paraphrase matching and zero-shot generalization, and it performs well when the user’s phrasing diverges from the corpus vocabulary. The costs are nontrivial. Query embedding requires neural inference, dense vectors consume significant storage, approximate nearest-neighbour indices introduce a recall–latency trade-off, and dense retrieval struggles with rare or domain-specific terms unless the embeddings are fine-tuned.</p>
+<h3 id="hybrid-retrieval">11.2.3 Hybrid Retrieval</h3>
+<p>Hybrid retrieval combines the two signals, <span class="math inline">\(s_{\text{hybrid}}(q,d) = \alpha s_{\text{dense}}(q,d) + (1-\alpha)s_{\text{sparse}}(q,d)\)</span>, and empirically improves recall and robustness across query types [<a href="#ref-hybridrag2025">9</a>]. Reciprocal rank fusion avoids the need to calibrate scores by combining ranked lists directly, <span class="math display">\[\text{RRF}(d) = \sum_{r \in R} \frac{1}{k + \text{rank}_r(d)}.\]</span> Hybrid retrieval reflects a general principle: redundancy across orthogonal signals improves reliability.</p>
+<h3 id="late-interaction-and-reranking">11.2.4 Late Interaction and Reranking</h3>
+<p>Initial retrieval emphasizes recall; reranking emphasizes precision. Cross-encoders jointly encode query and document, <span class="math inline">\(s_{\text{rerank}}(q,d) = \text{CrossEncoder}([q; d])\)</span>, achieving high accuracy at high cost. Late-interaction models such as ColBERT [<a href="#ref-colbert">4</a>] approximate this efficiently by computing token-level similarities. The standard cascade, shown in Figure <a href="#fig:retrieval-funnel">11.2</a>, retrieves a broad candidate set cheaply and applies the expensive model only to promising candidates.</p>
+<figure id="fig:retrieval-funnel">
+<img src="figures/11-retrieval-and-evidence-management-fig2-22f5bb9b52.png" />
+<figcaption><strong>Figure 11.2.</strong> The retrieval funnel. Cheap retrievers cast a wide net; an expensive reranker narrows it to the few documents that enter the context. Precision at the bottom of the funnel is what the model sees.</figcaption>
+</figure>
+<h2 id="chunking-the-retrieval-unit">11.3 Chunking: The Retrieval Unit</h2>
+<p>Documents must be partitioned into chunks before indexing, and chunking determines the unit over which retrieval operates. Large chunks preserve context and dilute relevance while consuming context capacity. Small chunks enable precise matching and fragment meaning while enlarging the index. The objective is to align chunk boundaries with semantic coherence while respecting embedding and context limits.</p>
+<p>Fixed-size chunking is simple and oblivious to structure. Recursive chunking respects natural boundaries such as paragraphs and headings without regard to meaning. Semantic chunking groups related sentences using embeddings, improving coherence at higher indexing cost. Hierarchical chunking preserves parent–child relationships, enabling retrieval of precise units with access to broader context. Systematic comparisons find that the choice interacts strongly with the embedding model and the domain, so no single scheme dominates; recursive chunking with overlap is a reasonable default rather than a settled answer [<a href="#ref-chunkstudy2025">28</a>, <a href="#ref-chunkeval2026">29</a>].</p>
+<p>Chunks often depend on document-level context. Contextual retrieval [<a href="#ref-anthropic2024contextual">2</a>] addresses this by generating a brief description of each chunk’s role within its document and embedding the description alongside the chunk, which improves retrieval when chunks reference entities or assumptions defined elsewhere.</p>
+<h2 id="index-structures">11.4 Index Structures</h2>
+<p>Efficient retrieval at scale requires indexing. A system that scans the entire corpus for every query has cost linear in corpus size and quickly becomes unusable; index structures trade storage and preprocessing for reduced query latency, and the choice of structure constrains what kinds of retrieval are feasible.</p>
+<h3 id="inverted-indices-for-sparse-retrieval">11.4.1 Inverted Indices for Sparse Retrieval</h3>
+<p>Sparse retrieval relies on inverted indices, which map each term to a posting list of the documents containing it, <span class="math inline">\(\text{term} \rightarrow [(d_1, f_1), (d_2, f_2), \ldots]\)</span>, where <span class="math inline">\(f_i\)</span> is the term’s frequency in <span class="math inline">\(d_i\)</span>. Query processing intersects the posting lists of the query terms and computes scores such as BM25. Decades of optimization, including skip lists, block-max indices, and early termination, allow sparse retrieval to operate at billion-document scale with predictable latency. From an engineering perspective, inverted indices offer stable query latency independent of any embedding model, index size linear in corpus size and easy to compress, and interpretable retrieval, since a score can be explained by term overlap. The limitation is semantic brittleness: if the relevant documents do not share the query’s terms, the index cannot find them.</p>
+<h3 id="approximate-nearest-neighbour-for-dense-retrieval">11.4.2 Approximate Nearest Neighbour for Dense Retrieval</h3>
+<p>Dense retrieval requires nearest-neighbour search in a high-dimensional space, and exact search is linear in corpus size, which is infeasible beyond modest scales. Approximate nearest-neighbour (ANN) algorithms sacrifice exactness for latency, aiming at sufficiently high recall rather than perfect recall. <em>Hierarchical Navigable Small World</em> (HNSW) builds a multi-layer graph in which nodes connect to nearby neighbours; queries traverse from coarse to fine layers, giving logarithmic-time search with high empirical recall. <em>Inverted File Index</em> (IVF) partitions the vector space into clusters and searches only the relevant ones; with product quantization (PQ) to compress the vectors, IVF-PQ scales to billion-vector corpora. Vector databases encapsulate these algorithms and add metadata filtering, replication, and online updates; in practice HNSW with metadata filtering achieves sub-100 ms retrieval at 95%+ recall for typical workloads.</p>
+<div class="center">
+<table>
+<thead>
+<tr>
+<th style="text-align: left;">Index type</th>
+<th style="text-align: right;">Build time</th>
+<th style="text-align: right;">Query time</th>
+<th style="text-align: right;">Recall@10</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: left;">Flat (exact)</td>
+<td style="text-align: right;"><span class="math inline">\(O(n)\)</span></td>
+<td style="text-align: right;"><span class="math inline">\(O(n)\)</span></td>
+<td style="text-align: right;">100%</td>
+</tr>
+<tr>
+<td style="text-align: left;">IVF-PQ</td>
+<td style="text-align: right;"><span class="math inline">\(O(n)\)</span></td>
+<td style="text-align: right;"><span class="math inline">\(O(\sqrt{n})\)</span></td>
+<td style="text-align: right;">90–95%</td>
+</tr>
+<tr>
+<td style="text-align: left;">HNSW</td>
+<td style="text-align: right;"><span class="math inline">\(O(n \log n)\)</span></td>
+<td style="text-align: right;"><span class="math inline">\(O(\log n)\)</span></td>
+<td style="text-align: right;">95–99%</td>
+</tr>
+</tbody>
+</table>
+</div>
+<p>The engineering decision is explicit: choose the lowest-recall configuration that still supports the downstream task accuracy.</p>
+<h2 id="query-processing">11.5 Query Processing</h2>
+<p>User queries are rarely good retrieval queries. Query processing transforms user intent into forms that maximize retrieval effectiveness while controlling cost.</p>
+<h3 id="query-rewriting">11.5.1 Query Rewriting</h3>
+<p>Raw queries may be ambiguous, underspecified, or poorly aligned with corpus terminology. Query rewriting uses a model to reformulate them before retrieval, for clarification (expanding vague references into explicit entities), decomposition (splitting compound questions into simpler sub-queries), and expansion (adding synonyms and related terms). HyDE [<a href="#ref-hyde">10</a>] generates a hypothetical answer and retrieves documents similar to that answer; it is effective when the user’s phrasing diverges from the corpus language, and it increases compute cost and can bias retrieval toward hallucinated concepts if it is not validated. Multi-query retrieval generates several rewritten queries and fuses the results, improving recall at the cost of additional retrieval; RAG-Fusion [<a href="#ref-ragfusion">13</a>] uses reciprocal rank fusion to combine them without score calibration.</p>
+<h3 id="query-routing">11.5.2 Query Routing</h3>
+<p>Different queries require different sources and strategies. Query routing classifies intent and dispatches accordingly, deciding which knowledge bases to query, whether to use sparse, dense, or hybrid retrieval, and how deeply to retrieve and rerank. Adaptive RAG [<a href="#ref-adaptiverag">21</a>] shows that lightweight routing improves efficiency by avoiding over-retrieval on simple queries while enabling deeper retrieval on complex ones.</p>
+<h2 id="advanced-rag-architectures">11.6 Advanced RAG Architectures</h2>
+<p>Basic retrieve-then-generate pipelines fail in predictable ways: unnecessary retrieval, irrelevant context, and brittle grounding. Advanced architectures address these failures explicitly.</p>
+<p><em>Self-RAG</em> [<a href="#ref-selfrag">19</a>] trains the model to reason about retrieval itself. The model emits control tokens indicating whether retrieval is needed, whether the retrieved documents are relevant, and whether the generated content is supported by evidence. This reduces unnecessary retrieval and improves faithfulness, and it treats retrieval as a decision problem rather than a fixed preprocessing step.</p>
+<p><em>Corrective RAG</em> [<a href="#ref-crag">5</a>] detects retrieval failures and retries with modified strategies. If the retrieved documents are irrelevant, the system rewrites the query, searches alternative sources, or decomposes the question. Corrective loops ensure that generation proceeds only when evidence quality meets a threshold, which shifts complexity from generation to retrieval, where errors are cheaper to detect.</p>
+<p><em>Multi-hop retrieval</em> chains information across documents by decomposing a query into sequential retrieval steps, each conditioned on the previous results. RAPTOR [<a href="#ref-raptor">15</a>] builds hierarchical summaries that support retrieval at several levels of abstraction. Graph RAG [<a href="#ref-graphrag">8</a>] constructs entity–relationship graphs that support relational queries spanning documents.</p>
+<p><em>Agentic RAG</em> [<a href="#ref-agenticrag2025">1</a>] embeds autonomous agents into the retrieval pipeline. Agents plan retrieval strategies, select tools, evaluate intermediate evidence, and adapt. This aligns retrieval with the control loop of earlier chapters: planning decides what to retrieve, tool use executes it, reflection validates the evidence, and iteration refines.</p>
+<h3 id="is-agentic-rag-worth-it">11.6.1 Is Agentic RAG Worth It?</h3>
+<p>The question deserves an answer with numbers attached, because agentic retrieval costs several times what a single-shot pipeline costs and the literature reporting it tends to be written by its authors. Controlled comparison across approaches finds the gains real and conditional: the adaptive machinery pays on queries that genuinely require multiple hops or query reformulation, and loses on the large fraction of traffic that a single well-formed retrieval answers [<a href="#ref-isagenticrag2026">25</a>]. This is the cascade argument of Chapter <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a> in a new setting: route by difficulty, and reserve the expensive path for queries that need it. Cost-aware query routing makes that explicit for retrieval, treating retrieval <em>depth</em> as the routed variable and trading grounding against token cost and latency per query rather than globally [<a href="#ref-ragrouting2026">27</a>]. A fixed top-<span class="math inline">\(k\)</span> is a decision made once, for all queries, by someone who had not seen them.</p>
+<h3 id="error-compounding-across-hops">11.6.2 Error Compounding Across Hops</h3>
+<p>Multi-hop retrieval has a failure mode that single-shot retrieval lacks: a mistake at hop one becomes the query for hop two. The CHARM framework characterizes this cascading hallucination in agentic RAG and proposes detection that operates across the hop chain rather than on any single output [<a href="#ref-charm2026">24</a>]. Figure <a href="#fig:multihop">11.3</a> shows the mechanism and the remedy. The practical implication is a gate (Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a>) at each hop boundary rather than only at the end. Evidence quality should be checked before it becomes the basis for the next retrieval, because by the final answer the error has been laundered through three steps of plausible reasoning and no longer looks like a retrieval failure.</p>
+<figure id="fig:multihop">
+<img src="figures/11-retrieval-and-evidence-management-fig3-7e0c3a774f.png" />
+<figcaption><strong>Figure 11.3.</strong> Multi-hop retrieval with a gate at each hop boundary. Without the gates, an error at hop 1 is carried forward as the premise of hops 2 and 3 and surfaces at the end as a confident, well-reasoned wrong answer.</figcaption>
+</figure>
+<h3 id="retrieval-as-an-attack-surface">11.6.3 Retrieval as an Attack Surface</h3>
+<p>Retrieved content is untrusted input that the agent treats as evidence, which makes the corpus an injection vector. Black-box attacks that hijack the reasoning of agentic RAG systems by planting content designed to be retrieved have been demonstrated [<a href="#ref-kidnaprag2026">26</a>]. Two defenses belong in the design rather than in an incident plan. Retrieved text should be structurally marked as data and never as instruction, and the agent’s capabilities should be scoped so that a successful injection cannot reach anything expensive (Chapter <a href="12-capability-boundaries-and-secure-tool-use.html#ch:capability">12</a>). Chapter <a href="01-terms-and-operational-definitions.html#ch:terms">1</a> made the general point; retrieval is where it is most often forgotten, because the corpus feels internal even when anyone with a wiki account can write to it.</p>
+<h2 id="evidence-management">11.7 Evidence Management</h2>
+<p>Retrieved documents are raw inputs. Evidence management turns them into a form that reliably supports reasoning; without it, retrieval increases the risk of hallucination by flooding the model with loosely related text. It answers three questions: which retrieved material to include, how to represent it, and how to order and attribute it.</p>
+<h3 id="evidence-aggregation">11.7.1 Evidence Aggregation</h3>
+<p>Retrieved documents overlap, contradict, or partly address the query, and an aggregation strategy decides how to combine them. <em>Concatenation</em> appends everything; it preserves information and risks exceeding the context and diluting relevance, so it is viable only when retrieval precision is high and the window is large. <em>Summarization</em> compresses documents before inclusion; it reduces context usage and adds a modeling step that can distort facts or drop details. <em>Extraction</em> selects only the relevant passages; it requires fine-grained relevance modeling and offers the best balance of precision and context efficiency for factual tasks. <em>Fusion</em> synthesizes evidence into a unified representation; REPLUG [<a href="#ref-replug">22</a>] formalizes this by marginalizing over retrieved documents during generation rather than committing to one context. Question answering benefits from extraction, synthesis tasks from fusion, and exploratory tasks may tolerate concatenation.</p>
+<h3 id="evidence-validation">11.7.2 Evidence Validation</h3>
+<p>Retrieval does not guarantee correctness, and validation filters evidence before it influences generation. The dimensions are relevance (does the document address the query?), recency (is it current?), authority (is the source credible?), and consistency (do the sources agree?). Validation can be implemented with lightweight classifiers, model-based graders, or heuristic rules. SEER [<a href="#ref-seer2024">18</a>] performs self-aligned extraction to enforce faithfulness; TrustRAG [<a href="#ref-trustrag">20</a>] detects poisoned data through clustering and self-assessment. Over-validation reduces recall and frustrates users; under-validation raises the hallucination risk; the threshold depends on domain risk.</p>
+<h3 id="context-ordering">11.7.3 Context Ordering</h3>
+<p>Models do not attend uniformly across a long context. The lost-in-the-middle phenomenon [<a href="#ref-liu2024lost">12</a>] shows attention concentrating at the beginning and end of the prompt. Effective ordering places the most relevant evidence first or last, interleaves documents rather than grouping by source, adds explicit separators and metadata headers, and keeps the context well below the window’s maximum. Ordering is a low-cost optimization with a disproportionate effect on answer quality.</p>
+<h3 id="citation-and-attribution">11.7.4 Citation and Attribution</h3>
+<p>Grounded generation requires explicit attribution. Citations enable verification, build trust, and simplify debugging. Common approaches include inline citation markers with post-processing, structured outputs pairing claims with sources, and secondary verification passes that check support. A citation failure usually indicates an upstream retrieval or validation error and should be logged as a system fault.</p>
+<h2 id="retrieval-metrics">11.8 Retrieval Metrics</h2>
+<p>Retrieval must be evaluated both on its own and end to end. <em>Retrieval quality</em> metrics, Recall@k, Precision@k, MRR, and nDCG, measure ranking quality; high recall is necessary and insufficient, since precision determines how much noise enters the context. <em>End-to-end</em> metrics measure what matters: answer correctness, faithfulness to the evidence, and attribution accuracy. RAGAS [<a href="#ref-ragas">14</a>] evaluates these jointly and exposes cases where good retrieval still yields poor answers. <em>Efficiency</em> metrics, latency, throughput, and cost, constrain deployment: dense retrieval is considerably more expensive than sparse, and reranking adds latency in exchange for precision.</p>
+<h2 id="worked-example-an-enterprise-knowledge-base">11.9 Worked Example: An Enterprise Knowledge Base</h2>
+<p>Consider retrieval over an enterprise knowledge base of 100<span>,</span>000 documents: policies, procedures, technical documentation.</p>
+<p><em>Indexing.</em> Documents are chunked by recursive splitting into 512-token chunks with 50-token overlap. Contextual descriptions are generated for chunks of long documents. Dense embeddings (E5-large, 1024 dimensions) and a sparse BM25 index are built, and both are stored in a vector database with metadata (document type, date, department).</p>
+<p><em>Retrieval pipeline.</em> Queries are rewritten to expand acronyms and clarify ambiguous terms. Hybrid retrieval with <span class="math inline">\(\alpha = 0.7\)</span> dense and <span class="math inline">\(0.3\)</span> sparse returns the top 50. Metadata filtering restricts results to documents the user may access, enforcing the access-control list at retrieval time. A cross-encoder reranks the 50 and returns the top 5. Evidence validation grades relevance and falls back to web search if the internal sources are insufficient.</p>
+<p><em>Generation.</em> The context contains the top 5 documents, most relevant first. The prompt includes document metadata and instructs the model to cite sources. The response carries inline citations, and post-processing validates them and adds source links.</p>
+<p><em>Evaluation.</em> Retrieval targets Recall@5 of 85% or better on a held-out query set. Generation targets a faithfulness score of 90% or better on sampled responses. Latency targets a 95th percentile under 500 ms including reranking. User feedback is collected and tracked over time.</p>
+<h2 id="summary">11.10 Summary</h2>
+<p>Retrieval gives agents access to knowledge beyond their parameters. The retrieval problem maps to memory access in a computer system, with analogous optimizations, and its objective is downstream task performance rather than any intrinsic relevance score.</p>
+<p>Three retrieval methods dominate: sparse, dense, and hybrid. Hybrid retrieval followed by reranking achieves the best precision, with cheap retrieval casting a wide net and an expensive reranker narrowing it. Chunking sets the retrieval unit and trades context preservation against precision; recursive chunking with overlap and contextual descriptions is a practical default. Index structures make retrieval feasible at scale: inverted indices for sparse retrieval, approximate nearest-neighbour indices for dense. Query processing transforms user intent into effective queries.</p>
+<p>Advanced architectures address specific failures: Self-RAG models the retrieval decision, Corrective RAG detects and repairs failures, multi-hop retrieval handles queries that span documents, and agentic RAG adapts strategy dynamically, at a cost that pays only on the queries that need it. Errors compound across hops and require a gate at each boundary. Evidence management refines retrieved documents into usable context through aggregation, validation, ordering, and citation.</p>
+<p>Retrieval is a first-class component. Every design decision, chunking, embedding model, reranking threshold, context ordering, affects the agent’s output, and it should be evaluated by that output.</p>
+<h2 id="common-misunderstandings">11.11 Common Misunderstandings</h2>
+<p><em>More retrieval is better.</em> Retrieving too many documents dilutes the context with noise, and the model may ignore relevant content buried in irrelevant text. Optimize precision as well as recall.</p>
+<p><em>Dense retrieval supersedes sparse.</em> Hybrid consistently outperforms either alone. Sparse retrieval catches exact matches that dense retrieval misses.</p>
+<p><em>Chunking is a detail.</em> Poor chunking is the most common cause of retrieval failure. A chunk that mixes topics matches many queries weakly rather than few queries strongly.</p>
+<p><em>Reranking is optional.</em> Initial retrieval optimizes efficiency; reranking optimizes quality. A cross-encoder over the top 100 adds 50–100 ms and substantially improves precision.</p>
+<p><em>Embeddings are universal.</em> General-purpose embeddings may represent domain terminology poorly. Fine-tune on domain data or use a domain-specific model.</p>
+<p><em>The index can be built once.</em> Knowledge bases change, and a stale index returns outdated information. Implement incremental indexing and cache invalidation.</p>
+<p><em>A vector database solves retrieval.</em> The database is infrastructure. Retrieval quality depends on chunking, embeddings, reranking, and query processing.</p>
+<p><em>Empty retrieval can be ignored.</em> When nothing relevant is returned, the model may hallucinate or refuse. Implement fallbacks: query rewriting, alternative sources, graceful degradation.</p>
+<h2 class="unnumbered" id="exercises">Exercises</h2>
+<ol>
+<li><p><strong>Chunking analysis.</strong> A 10<span>,</span>000-token document contains 20 distinct topics. Compare (a) fixed 500-token chunks and (b) semantic chunking that produces variable-size, topic-aligned chunks. For a query targeting a single topic, analyze the expected recall and precision under each strategy. What assumptions must hold for semantic chunking to win?</p></li>
+<li><p><strong>Hybrid retrieval optimization.</strong> BM25 achieves Recall@10 of 0.72, dense retrieval 0.78, and their reciprocal-rank fusion 0.85. Explain why the hybrid exceeds both. Design an experiment to determine the optimal weight <span class="math inline">\(\alpha\)</span> for a linear combination, and state what data it requires.</p></li>
+<li><p><strong>Reranking cost–benefit.</strong> A retrieval system serves 1<span>,</span>000 queries per second. Initial retrieval takes 50 ms and cross-encoder reranking takes 5 ms per document. With top-100 retrieval reranked to top-10, what is the total latency? How does parallelization help? At what throughput does reranking become infeasible?</p></li>
+<li><p><strong>Multi-hop decomposition.</strong> The query “What was the revenue growth of the company that acquired the startup founded by the person who invented the algorithm used in our recommendation system?” requires multi-hop retrieval. Decompose it into a retrieval chain, identify the dependencies between steps, and describe how Corrective RAG would handle a failure at step 2.</p></li>
+<li><p><strong>Evidence validation design.</strong> Design a validation pipeline for a medical question-answering system. Specify (a) relevance criteria, (b) recency requirements, (c) authority assessment for sources, (d) consistency checking across documents, and (e) fallback behavior when validation fails. What are the risks of over-validation and of under-validation?</p></li>
+</ol>
+<h2 class="unnumbered" id="bibliographic-notes">Bibliographic Notes</h2>
+<p>Retrieval-augmented generation was introduced by Lewis et al. [<a href="#ref-lewis2020rag">11</a>], demonstrating that retrieval can substitute for model scale. RETRO [<a href="#ref-retro2022">17</a>] showed that a 7.5B-parameter model with retrieval matches a 175B-parameter model without it.</p>
+<p>Dense retrieval was advanced by DPR [<a href="#ref-dpr2020">6</a>] for open-domain question answering. Contrastive learning for embeddings is surveyed in [<a href="#ref-embeddingsurvey">23</a>]; E5 [<a href="#ref-e5">7</a>] and BGE provide strong general-purpose embeddings. Hybrid retrieval is analyzed in [<a href="#ref-hybridrag2025">9</a>]; reciprocal rank fusion was introduced by Cormack et al.; late-interaction models including ColBERT [<a href="#ref-colbert">4</a>] enable efficient reranking.</p>
+<p>Chunking strategies are compared systematically in [<a href="#ref-chunkstudy2025">28</a>] and [<a href="#ref-chunkeval2026">29</a>]. Contextual retrieval was introduced by Anthropic [<a href="#ref-anthropic2024contextual">2</a>].</p>
+<p>Self-RAG [<a href="#ref-selfrag">19</a>] models retrieval decisions with reflection tokens. Corrective RAG [<a href="#ref-crag">5</a>] adds self-correction loops. RAPTOR [<a href="#ref-raptor">15</a>] enables multi-level retrieval through recursive summarization. Graph RAG [<a href="#ref-graphrag">8</a>] constructs knowledge graphs for relational queries. Agentic RAG is surveyed in [<a href="#ref-agenticrag2025">1</a>], which categorizes architectures into single-agent, multi-agent, hierarchical, and corrective variants; the reasoning-RAG survey [<a href="#ref-reasoningrag2025">16</a>] connects RAG to dual-process theories of cognition.</p>
+<p>RAG evaluation frameworks include RAGAS [<a href="#ref-ragas">14</a>] and the unified evaluation process of Auepora [<a href="#ref-auepora">3</a>].</p>
+<h2 class="unnumbered" id="bibliography">Bibliography</h2>
+<ol>
+<li><div id="ref-agenticrag2025">
+
+</div>
+<p>A. Singh, A. Ehtesham, et al. Agentic Retrieval-Augmented Generation: A Survey on Agentic RAG. <span><em>arXiv preprint arXiv:2501.09136</em></span>, 2025.</p></li>
+<li><div id="ref-anthropic2024contextual">
+
+</div>
+<p>Anthropic. Introducing Contextual Retrieval. Technical Report, 2024.</p></li>
+<li><div id="ref-auepora">
+
+</div>
+<p>H. Yu et al. Evaluation of Retrieval-Augmented Generation: A Survey. <span><em>arXiv preprint arXiv:2405.07437</em></span>, 2024.</p></li>
+<li><div id="ref-colbert">
+
+</div>
+<p>O. Khattab and M. Zaharia. ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction over BERT. In <span><em>SIGIR</em></span>, 2020.</p></li>
+<li><div id="ref-crag">
+
+</div>
+<p>S. Yan et al. Corrective Retrieval Augmented Generation. <span><em>arXiv preprint arXiv:2401.15884</em></span>, 2024.</p></li>
+<li><div id="ref-dpr2020">
+
+</div>
+<p>V. Karpukhin, B. Oguz, S. Min, P. Lewis, L. Wu, S. Edunov, D. Chen, and W. Yih. Dense Passage Retrieval for Open-Domain Question Answering. In <span><em>EMNLP</em></span>, 2020.</p></li>
+<li><div id="ref-e5">
+
+</div>
+<p>L. Wang et al. Text Embeddings by Weakly-Supervised Contrastive Pre-training. <span><em>arXiv preprint arXiv:2212.03533</em></span>, 2022.</p></li>
+<li><div id="ref-graphrag">
+
+</div>
+<p>Microsoft. GraphRAG: Unlocking LLM Discovery on Narrative Private Data. Technical Report, 2024.</p></li>
+<li><div id="ref-hybridrag2025">
+
+</div>
+<p>C. Sharma. Retrieval-Augmented Generation: A Comprehensive Survey. <span><em>arXiv preprint arXiv:2506.00054</em></span>, 2025.</p></li>
+<li><div id="ref-hyde">
+
+</div>
+<p>L. Gao et al. Precise Zero-Shot Dense Retrieval without Relevance Labels. In <span><em>ACL</em></span>, 2023.</p></li>
+<li><div id="ref-lewis2020rag">
+
+</div>
+<p>P. Lewis, E. Perez, A. Piktus, F. Petroni, V. Karpukhin, N. Goyal, H. Küttler, M. Lewis, W. Yih, T. Rocktäschel, S. Riedel, and D. Kiela. Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks. In <span><em>NeurIPS</em></span>, 2020.</p></li>
+<li><div id="ref-liu2024lost">
+
+</div>
+<p>N. F. Liu et al. Lost in the Middle: How Language Models Use Long Contexts. <span><em>TACL</em></span>, 2024.</p></li>
+<li><div id="ref-ragfusion">
+
+</div>
+<p>Z. Rackauckas. RAG-Fusion: A New Take on Retrieval-Augmented Generation. <span><em>arXiv:2402.03367</em></span>, 2024.</p></li>
+<li><div id="ref-ragas">
+
+</div>
+<p>RAGAS. Evaluation Framework for RAG Pipelines. Documentation, 2024.</p></li>
+<li><div id="ref-raptor">
+
+</div>
+<p>P. Sarthi et al. RAPTOR: Recursive Abstractive Processing for Tree-Organized Retrieval. In <span><em>ICLR</em></span>, 2024.</p></li>
+<li><div id="ref-reasoningrag2025">
+
+</div>
+<p>Reasoning RAG Survey. Reasoning RAG via System 1 or System 2: A Survey. <span><em>arXiv preprint arXiv:2506.10408</em></span>, 2025.</p></li>
+<li><div id="ref-retro2022">
+
+</div>
+<p>S. Borgeaud et al. Improving Language Models by Retrieving from Trillions of Tokens. In <span><em>ICML</em></span>, 2022.</p></li>
+<li><div id="ref-seer2024">
+
+</div>
+<p>X. Zhao et al. SEER: Self-Aligned Evidence Extraction for Retrieval-Augmented Generation. <span><em>arXiv:2410.11315</em></span>, 2024.</p></li>
+<li><div id="ref-selfrag">
+
+</div>
+<p>A. Asai et al. Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection. In <span><em>ICLR</em></span>, 2024.</p></li>
+<li><div id="ref-trustrag">
+
+</div>
+<p>H. Zhou et al. TrustRAG: Enhancing Robustness and Trustworthiness in Retrieval-Augmented Generation. <span><em>arXiv:2501.00879</em></span>, 2025.</p></li>
+<li><div id="ref-adaptiverag">
+
+</div>
+<p>Soyeong Jeong, Jinheon Baek, Sukmin Cho, Sung Ju Hwang, and Jong C. Park. “Adaptive-RAG: Learning to Adapt Retrieval-Augmented Large Language Models through Question Complexity.” arXiv:2403.14403, 2024. NAACL 2024.</p></li>
+<li><div id="ref-replug">
+
+</div>
+<p>Weijia Shi, Sewon Min, Michihiro Yasunaga, Minjoon Seo, Rich James, Mike Lewis, Luke Zettlemoyer, and Wen-tau Yih. “REPLUG: Retrieval-Augmented Black-Box Language Models.” arXiv:2301.12652, 2023. NAACL 2024.</p></li>
+<li><div id="ref-embeddingsurvey">
+
+</div>
+<p>Hongliu Cao. “Recent Advances in Text Embedding: A Comprehensive Review of Top-Performing Methods on the MTEB Benchmark.” arXiv:2406.01607, 2024.</p></li>
+<li><div id="ref-charm2026">
+
+</div>
+<p>Saroj Mishra. “Cascading Hallucination in Agentic RAG: The CHARM Framework for Detection and Mitigation.” arXiv:2606.04435, 2026.</p></li>
+<li><div id="ref-isagenticrag2026">
+
+</div>
+<p>Pietro Ferrazzi et al. “Is Agentic RAG worth it? An experimental comparison of RAG approaches.” arXiv:2601.07711, 2026. ACL 2026.</p></li>
+<li><div id="ref-kidnaprag2026">
+
+</div>
+<p>Chanwoo Choi et al. “KidnapRAG: A Black-Box Attack for Hijacking Reasoning in Agentic Retrieval-Augmented Generation Systems.” arXiv:2607.00422, 2026. EMNLP 2026.</p></li>
+<li><div id="ref-ragrouting2026">
+
+</div>
+<p>Sanjay Mishra. “Cost-Aware Query Routing in RAG: Empirical Analysis of Retrieval Depth Tradeoffs.” arXiv:2606.02581, 2026.</p></li>
+<li><div id="ref-chunkstudy2025">
+
+</div>
+<p>Mahmoud Amiri and Thomas Bocklitz. “Chunk Twice, Embed Once: A Systematic Study of Segmentation and Representation Trade-offs in Retrieval-Augmented Generation.” arXiv:2506.17277, 2025.</p></li>
+<li><div id="ref-chunkeval2026">
+
+</div>
+<p>Valentin J. J. Kreileder, Johannes Reisinger, and Andreas Fischer. “Evaluating Chunking Strategies for Retrieval-Augmented Generation on Academic Texts.” arXiv:2607.01852, 2026.</p></li>
+</ol>
+
+<div id="bottom"><a href="10-memory-state-and-forgetting.html" rel="prev">&laquo; Memory, State, and Forgetting</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="12-capability-boundaries-and-secure-tool-use.html" rel="next">Capability Boundaries and Secure Tool Use &raquo;</a><br>&copy; 2026 Madhava Gaikwad. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
+</div>
+<script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+</body>
+</html>

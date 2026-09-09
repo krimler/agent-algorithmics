@@ -108,6 +108,8 @@ FIG_PREAMBLE = r"""
 \usepackage[scaled=0.96]{inter}
 \usepackage[scaled=0.92]{zi4}
 \usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
 """ + tikzlibs + "\n" + tikzset + "\n"
 
 # --------------------------------------------------------------------------

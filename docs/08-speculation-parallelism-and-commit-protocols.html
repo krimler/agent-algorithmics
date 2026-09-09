@@ -19,13 +19,14 @@
 <meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
 <link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/08-speculation-parallelism-and-commit-protocols.html">
+<script>try{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Speculation, Parallelism, and Commit Protocols", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 8, "url": "https://krimler.github.io/agent-algorithmics/08-speculation-parallelism-and-commit-protocols.html"}</script>
 
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="07-action-selection-under-budgets.html" rel="prev">&laquo; Action Selection Under Budgets</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="09-risk-aware-gates-verification-abstention-refusal.html" rel="next">Risk-Aware Gates: Verification, Abstention, Refusal &raquo;</a></div>
+<div id="top"><button id="theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="07-action-selection-under-budgets.html" rel="prev">&laquo; Action Selection Under Budgets</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="09-risk-aware-gates-verification-abstention-refusal.html" rel="next">Risk-Aware Gates: Verification, Abstention, Refusal &raquo;</a></div>
 <h1 id="ch:speculation"><span class="part">Part II: Control and Commitment</span>Chapter 8. Speculation, Parallelism, and Commit Protocols</h1><p>Watch an agent work and most of what you see is waiting.</p>
 <p>The default loop runs observe, decide, act, observe, decide. It is safe, because every decision is made with the latest evidence. It is also almost entirely idle. Ten steps at five seconds each is fifty seconds, and for most of that time the model is blocked on a tool that has no idea anyone is waiting. Users leave and service-level agreements break. The work was never the bottleneck; the ordering was.</p>
 <p>This chapter develops three techniques for breaking the sequential bottleneck. <em>Speculation</em> executes an action before it is known whether the result will be needed. <em>Parallelism</em> executes several actions that are known to be needed at the same time. <em>Commit protocols</em> decide when speculative or parallel results become permanent.</p>
@@ -483,5 +484,17 @@
 <span class="counter">Visitors: <img src="https://hits.sh/krimler.github.io/agent-algorithmics.svg?label=visitors&amp;color=1f5ac4" alt="visitor counter" height="20"></span></div>
 </div>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById('theme-toggle');
+  function apply(t) { root.setAttribute('data-theme', t); btn.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; }
+  var saved = null; try { saved = localStorage.getItem('theme'); } catch (e) {}
+  apply(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  btn.addEventListener('click', function () {
+    var t = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    apply(t); try { localStorage.setItem('theme', t); } catch (e) {}
+  });
+})();
+</script>
 </body>
 </html>

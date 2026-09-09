@@ -19,13 +19,14 @@
 <meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
 <link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/10-memory-state-and-forgetting.html">
+<script>try{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Memory, State, and Forgetting", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 10, "url": "https://krimler.github.io/agent-algorithmics/10-memory-state-and-forgetting.html"}</script>
 
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="09-risk-aware-gates-verification-abstention-refusal.html" rel="prev">&laquo; Risk-Aware Gates: Verification, Abstention, Refusal</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="11-retrieval-and-evidence-management.html" rel="next">Retrieval and Evidence Management &raquo;</a></div>
+<div id="top"><button id="theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="09-risk-aware-gates-verification-abstention-refusal.html" rel="prev">&laquo; Risk-Aware Gates: Verification, Abstention, Refusal</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="11-retrieval-and-evidence-management.html" rel="next">Retrieval and Evidence Management &raquo;</a></div>
 <h1 id="ch:memory"><span class="part">Part II: Control and Commitment</span>Chapter 10. Memory, State, and Forgetting</h1><p>Memory is what makes an agent an agent, and it is also how an agent’s mistakes become permanent.</p>
 <p>A system that forgets everything between responses is a function. It cannot learn a user’s preferences, cannot build on yesterday’s findings, and cannot notice that it has tried the same approach twice. Add memory and it can do all three. Add memory and one hallucinated fact, written once, is retrieved with confidence in every session that follows.</p>
 <p>That symmetry is the theme of this chapter. Memory amplifies whatever is put into it. Competence compounds, and so do errors, through identical mechanisms; a memory system cannot tell which it is propagating. The interesting work is therefore governance rather than storage. Storage is solved. What remains is deciding what earns a place in memory, where it lives, when it is retrieved, when it is superseded, and when it is deleted. Each of these is a policy decision with a failure mode, and the chapter is organized around them.</p>
@@ -319,5 +320,17 @@
 <span class="counter">Visitors: <img src="https://hits.sh/krimler.github.io/agent-algorithmics.svg?label=visitors&amp;color=1f5ac4" alt="visitor counter" height="20"></span></div>
 </div>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById('theme-toggle');
+  function apply(t) { root.setAttribute('data-theme', t); btn.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; }
+  var saved = null; try { saved = localStorage.getItem('theme'); } catch (e) {}
+  apply(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  btn.addEventListener('click', function () {
+    var t = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    apply(t); try { localStorage.setItem('theme', t); } catch (e) {}
+  });
+})();
+</script>
 </body>
 </html>

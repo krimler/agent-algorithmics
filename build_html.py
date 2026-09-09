@@ -353,41 +353,47 @@ def preprocess(ch):
 # --------------------------------------------------------------------------
 
 CSS = """\
+:root { --bg: #fff; --fg: #111; --muted: #444; --rule: #999; --rule-soft: #ccc; --link: #00e; --visited: #551a8b;
+        --pre-bg: #f4f4f4; --pre-border: #ddd; --cap: #333; --part: #555; }
+html[data-theme="dark"] { --bg: #14161a; --fg: #e6e4de; --muted: #b8b5ad; --rule: #666; --rule-soft: #3a3d44; --link: #8ab4ff;
+        --visited: #c9a7ff; --pre-bg: #1e2126; --pre-border: #33373f; --cap: #c9c6bf; --part: #a09d95; }
 body { font-family: Georgia, "Times New Roman", serif; font-size: 17px; line-height: 1.5;
-       color: #111; background: #fff; margin: 0; padding: 0 1em; }
+       color: var(--fg); background: var(--bg); margin: 0; padding: 0 1em; }
 #page { max-width: 44em; margin: 0 auto; }
-#top, #bottom { font-family: Verdana, Arial, sans-serif; font-size: 13px; color: #444;
-       border-bottom: 1px solid #999; padding: 0.6em 0; }
-#bottom { border-bottom: none; border-top: 1px solid #999; margin-top: 3em; }
-#top a, #bottom a { color: #00e; }
+#top, #bottom { font-family: Verdana, Arial, sans-serif; font-size: 13px; color: var(--muted);
+       border-bottom: 1px solid var(--rule); padding: 0.6em 0; }
+#bottom { border-bottom: none; border-top: 1px solid var(--rule); margin-top: 3em; }
+#top a, #bottom a { color: var(--link); }
+#theme-toggle { float: right; background: none; border: 1px solid var(--rule); color: var(--muted); font: inherit; padding: 0.1em 0.6em; cursor: pointer; }
 #top .book { font-weight: bold; }
 h1 { font-size: 1.9em; margin: 1.2em 0 0.3em; line-height: 1.2; }
-h1 .part { display: block; font-size: 0.55em; font-weight: normal; color: #555;
+h1 .part { display: block; font-size: 0.55em; font-weight: normal; color: var(--part);
        letter-spacing: 0.04em; text-transform: uppercase; }
-h2 { font-size: 1.35em; margin-top: 2em; border-bottom: 1px solid #ccc; padding-bottom: 0.15em; }
+h2 { font-size: 1.35em; margin-top: 2em; border-bottom: 1px solid var(--rule-soft); padding-bottom: 0.15em; }
 h3 { font-size: 1.1em; margin-top: 1.6em; }
 h4, h5 { font-size: 1em; margin: 1.2em 0 0.4em; }
 h5 { font-style: italic; font-weight: normal; }
-a { color: #00e; }  a:visited { color: #551a8b; }
+a { color: var(--link); }  a:visited { color: var(--visited); }
 p { margin: 0 0 1em; text-align: left; }
 figure { margin: 1.5em 0; text-align: center; }
-figure img { width: 88%; max-width: 100%; height: auto; }
-figcaption { font-size: 0.9em; color: #333; text-align: left; margin-top: 0.6em; }
+figure img { width: 88%; max-width: 100%; height: auto; background: #fff; }
+html[data-theme="dark"] figure img { padding: 0.6em; box-sizing: border-box; border-radius: 4px; }
+figcaption { font-size: 0.9em; color: var(--cap); text-align: left; margin-top: 0.6em; }
 table { border-collapse: collapse; margin: 1.2em auto; font-size: 0.95em; }
 th, td { padding: 0.25em 0.8em; text-align: left; vertical-align: top; }
-thead th { border-bottom: 1px solid #333; }
-tbody { border-bottom: 1px solid #333; }
-pre { background: #f4f4f4; border: 1px solid #ddd; padding: 0.7em 1em; overflow-x: auto;
+thead th { border-bottom: 1px solid var(--fg); }
+tbody { border-bottom: 1px solid var(--fg); }
+pre { background: var(--pre-bg); border: 1px solid var(--pre-border); padding: 0.7em 1em; overflow-x: auto;
       font-size: 0.85em; line-height: 1.35; }
 code { font-family: "Courier New", Courier, monospace; }
 blockquote { margin: 1em 2em; }
 ol.toc, ul.toc { list-style: none; padding-left: 0; }
 ul.toc li { margin: 0.3em 0; }
 ul.toc li.part { margin-top: 1.4em; font-family: Verdana, Arial, sans-serif; font-size: 0.85em;
-      text-transform: uppercase; letter-spacing: 0.05em; color: #555; }
+      text-transform: uppercase; letter-spacing: 0.05em; color: var(--part); }
 .enumerate-bib { font-size: 0.7em; }
 .enumerate-bib li { margin-bottom: 0.35em; line-height: 1.35; }
-hr { border: 0; border-top: 1px solid #999; }
+hr { border: 0; border-top: 1px solid var(--rule); }
 .counter img { vertical-align: middle; margin-left: 0.3em; }
 .smallcaps { font-variant: small-caps; }
 """
@@ -427,18 +433,31 @@ def page(title, desc, body_html, prev, nxt, canonical, extra_head="", jsonld=Non
 <meta name="twitter:image" content="{BASE_URL}/cover-front.jpg">
 <link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 {canon}
+<script>try{{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}}catch(e){{}}</script>
 <link rel="stylesheet" href="style.css">
 {ld}
 {extra_head}
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">{BOOK_TITLE}</a></span>: {html.escape(SUBTITLE)}<br>{navs}</div>
+<div id="top"><button id="theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button><span class="book"><a href="index.html">{BOOK_TITLE}</a></span>: {html.escape(SUBTITLE)}<br>{navs}</div>
 {body_html}
 <div id="bottom">{navs}<br>&copy; {YEAR} {AUTHOR}. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.<br>
 <span class="counter">Visitors: <img src="https://hits.sh/krimler.github.io/agent-algorithmics.svg?label=visitors&amp;color=1f5ac4" alt="visitor counter" height="20"></span></div>
 </div>
 {MATHJAX}
+<script>
+(function () {{
+  var root = document.documentElement, btn = document.getElementById('theme-toggle');
+  function apply(t) {{ root.setAttribute('data-theme', t); btn.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; }}
+  var saved = null; try {{ saved = localStorage.getItem('theme'); }} catch (e) {{}}
+  apply(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  btn.addEventListener('click', function () {{
+    var t = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    apply(t); try {{ localStorage.setItem('theme', t); }} catch (e) {{}}
+  }});
+}})();
+</script>
 </body>
 </html>
 """

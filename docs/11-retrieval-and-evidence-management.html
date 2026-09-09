@@ -19,13 +19,14 @@
 <meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
 <link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/11-retrieval-and-evidence-management.html">
+<script>try{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Retrieval and Evidence Management", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 11, "url": "https://krimler.github.io/agent-algorithmics/11-retrieval-and-evidence-management.html"}</script>
 
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="10-memory-state-and-forgetting.html" rel="prev">&laquo; Memory, State, and Forgetting</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="12-capability-boundaries-and-secure-tool-use.html" rel="next">Capability Boundaries and Secure Tool Use &raquo;</a></div>
+<div id="top"><button id="theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="10-memory-state-and-forgetting.html" rel="prev">&laquo; Memory, State, and Forgetting</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="12-capability-boundaries-and-secure-tool-use.html" rel="next">Capability Boundaries and Secure Tool Use &raquo;</a></div>
 <h1 id="ch:retrieval"><span class="part">Part II: Control and Commitment</span>Chapter 11. Retrieval and Evidence Management</h1><p>Agents that reason from knowledge must retrieve that knowledge. A language model’s parameters encode statistical regularities learned during training, and those parameters are static: they cannot incorporate new facts, reflect organizational knowledge, or respond to events that occurred after training. Retrieval compensates for this by allowing an agent to condition its reasoning on external evidence.</p>
 <p>Retrieval is often conflated with search, and the conflation is expensive. A search engine serves a human who will browse, skim, discard, and interpret. Ten links is a good answer because the reader does the filtering. An agent does no filtering worth the name: whatever is retrieved enters its context and competes for attention with everything else there. Ten documents where two were needed is eight documents’ worth of distraction, paid for on every subsequent call.</p>
 <p>The success criterion therefore moves. Retrieval works when the final answer improves. Documents that look relevant, score well, and change nothing are a cost with no benefit, and the standard retrieval metrics will report them as a success. Search engines optimize for diversity, freshness, and engagement; retrieval systems must optimize for precision under tight context and latency constraints. Documents that are useful for a human to read may be actively harmful when injected wholesale into a model’s context, where irrelevant text dilutes attention and raises the risk of hallucination.</p>
@@ -336,5 +337,17 @@
 <span class="counter">Visitors: <img src="https://hits.sh/krimler.github.io/agent-algorithmics.svg?label=visitors&amp;color=1f5ac4" alt="visitor counter" height="20"></span></div>
 </div>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById('theme-toggle');
+  function apply(t) { root.setAttribute('data-theme', t); btn.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; }
+  var saved = null; try { saved = localStorage.getItem('theme'); } catch (e) {}
+  apply(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  btn.addEventListener('click', function () {
+    var t = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    apply(t); try { localStorage.setItem('theme', t); } catch (e) {}
+  });
+})();
+</script>
 </body>
 </html>

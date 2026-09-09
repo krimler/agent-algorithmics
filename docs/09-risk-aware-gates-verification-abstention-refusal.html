@@ -19,13 +19,14 @@
 <meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
 <link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/09-risk-aware-gates-verification-abstention-refusal.html">
+<script>try{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Risk-Aware Gates: Verification, Abstention, Refusal", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 9, "url": "https://krimler.github.io/agent-algorithmics/09-risk-aware-gates-verification-abstention-refusal.html"}</script>
 
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="08-speculation-parallelism-and-commit-protocols.html" rel="prev">&laquo; Speculation, Parallelism, and Commit Protocols</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="10-memory-state-and-forgetting.html" rel="next">Memory, State, and Forgetting &raquo;</a></div>
+<div id="top"><button id="theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="08-speculation-parallelism-and-commit-protocols.html" rel="prev">&laquo; Speculation, Parallelism, and Commit Protocols</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="10-memory-state-and-forgetting.html" rel="next">Memory, State, and Forgetting &raquo;</a></div>
 <h1 id="ch:gates"><span class="part">Part II: Control and Commitment</span>Chapter 9. Risk-Aware Gates: Verification, Abstention, Refusal</h1><p>A gate is the last moment at which a bad action is still cheap. Everything before it is proposal, and proposals cost nothing beyond the computation that produced them. Everything after it is consequence, billed at whatever the world charges. An agent without gates has no such moment: generation flows directly into side effects, and the only remaining defense is that the model happens to be right. It usually is. This chapter is about the rest of the time.</p>
 <p>We develop the theory and algorithms of gates. We formalize the four outcomes (execute, verify, abstain, refuse), derive threshold conditions for each, present algorithms for gate decisions, and analyze the cost–benefit trade-offs that determine an optimal gate policy. The treatment draws on decision theory, classification with rejection, and systems verification, and unifies these traditions into a single framework for agent control.</p>
 <h2 id="the-gate-abstraction">9.1 The Gate Abstraction</h2>
@@ -460,5 +461,17 @@
 <span class="counter">Visitors: <img src="https://hits.sh/krimler.github.io/agent-algorithmics.svg?label=visitors&amp;color=1f5ac4" alt="visitor counter" height="20"></span></div>
 </div>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById('theme-toggle');
+  function apply(t) { root.setAttribute('data-theme', t); btn.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; }
+  var saved = null; try { saved = localStorage.getItem('theme'); } catch (e) {}
+  apply(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  btn.addEventListener('click', function () {
+    var t = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    apply(t); try { localStorage.setItem('theme', t); } catch (e) {}
+  });
+})();
+</script>
 </body>
 </html>

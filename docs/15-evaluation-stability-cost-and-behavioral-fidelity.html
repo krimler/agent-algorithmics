@@ -19,13 +19,14 @@
 <meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
 <link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/15-evaluation-stability-cost-and-behavioral-fidelity.html">
+<script>try{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Evaluation: Stability, Cost, and Behavioral Fidelity", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 15, "url": "https://krimler.github.io/agent-algorithmics/15-evaluation-stability-cost-and-behavioral-fidelity.html"}</script>
 
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="14-trace-semantics-and-agent-telemetry.html" rel="prev">&laquo; Trace Semantics and Agent Telemetry</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="16-case-studies-and-design-patterns.html" rel="next">Case Studies and Design Patterns &raquo;</a></div>
+<div id="top"><button id="theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="14-trace-semantics-and-agent-telemetry.html" rel="prev">&laquo; Trace Semantics and Agent Telemetry</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="16-case-studies-and-design-patterns.html" rel="next">Case Studies and Design Patterns &raquo;</a></div>
 <h1 id="ch:evaluation"><span class="part">Part III: Observability and Evaluation</span>Chapter 15. Evaluation: Stability, Cost, and Behavioral Fidelity</h1><p>Run the same agent on the same task ten times. Count how many times it succeeds, how many distinct action sequences it takes, and how much the most expensive run cost relative to the cheapest.</p>
 <p>For most agents those three numbers are more informative than any benchmark score, and most teams have never collected them. The mean success rate that gets reported hides a distribution, and the distribution determines whether the system can be operated. A system that is excellent seven times and catastrophic three times has the same mean as one that is merely good every time, and only one of them can be put in front of customers. Figure <a href="#fig:variance">15.1</a> shows the two.</p>
 <figure id="fig:variance">
@@ -424,5 +425,17 @@
 <span class="counter">Visitors: <img src="https://hits.sh/krimler.github.io/agent-algorithmics.svg?label=visitors&amp;color=1f5ac4" alt="visitor counter" height="20"></span></div>
 </div>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById('theme-toggle');
+  function apply(t) { root.setAttribute('data-theme', t); btn.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; }
+  var saved = null; try { saved = localStorage.getItem('theme'); } catch (e) {}
+  apply(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  btn.addEventListener('click', function () {
+    var t = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    apply(t); try { localStorage.setItem('theme', t); } catch (e) {}
+  });
+})();
+</script>
 </body>
 </html>

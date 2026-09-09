@@ -19,13 +19,14 @@
 <meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
 <link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/16-case-studies-and-design-patterns.html">
+<script>try{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Case Studies and Design Patterns", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 16, "url": "https://krimler.github.io/agent-algorithmics/16-case-studies-and-design-patterns.html"}</script>
 
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="15-evaluation-stability-cost-and-behavioral-fidelity.html" rel="prev">&laquo; Evaluation: Stability, Cost, and Behavioral Fidelity</a> &nbsp;|&nbsp; <a href="index.html">Contents</a></div>
+<div id="top"><button id="theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="15-evaluation-stability-cost-and-behavioral-fidelity.html" rel="prev">&laquo; Evaluation: Stability, Cost, and Behavioral Fidelity</a> &nbsp;|&nbsp; <a href="index.html">Contents</a></div>
 <h1 id="ch:patterns"><span class="part">Part IV: Synthesis</span>Chapter 16. Case Studies and Design Patterns</h1><p>Fourteen chapters of machinery raise the question a reader building something next week actually has: which parts are needed for this system?</p>
 <p>This chapter answers with patterns and case studies. The patterns are reusable, and each comes with the conditions under which it stops working. The case studies are complete designs, worth reading less for their architectures than for the interactions: the places where two individually sensible components combine into something that violates a constraint neither of them knew about. The patterns and case studies draw on production systems deployed in 2025, including deep research agents, software engineering agents, and enterprise assistants, and cite specific architectures and their measured performance where possible.</p>
 <p>One theme runs through all of it: <em>constraint-aware composition</em>. Agents seldom fail because a component is weak. They fail at the seams. A retrieval step that is individually excellent consumes the budget that synthesis needed; a compaction pass that is individually correct removes a policy the gate assumed was present; two agents that each hold a valid lock deadlock on a shared file. The best architecture is almost always the simplest one that satisfies its constraints with margin, and margin is the operative word: a design that exactly meets its budget under median load has no answer for the 95th-percentile run.</p>
@@ -519,5 +520,17 @@ def process_refund(account_id, amount, reason):
 <span class="counter">Visitors: <img src="https://hits.sh/krimler.github.io/agent-algorithmics.svg?label=visitors&amp;color=1f5ac4" alt="visitor counter" height="20"></span></div>
 </div>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById('theme-toggle');
+  function apply(t) { root.setAttribute('data-theme', t); btn.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; }
+  var saved = null; try { saved = localStorage.getItem('theme'); } catch (e) {}
+  apply(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  btn.addEventListener('click', function () {
+    var t = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    apply(t); try { localStorage.setItem('theme', t); } catch (e) {}
+  });
+})();
+</script>
 </body>
 </html>

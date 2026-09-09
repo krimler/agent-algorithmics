@@ -19,13 +19,14 @@
 <meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
 <link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/03-a-short-history-of-agents-control-and-commitment.html">
+<script>try{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "A Short History of Agents, Control, and Commitment", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 3, "url": "https://krimler.github.io/agent-algorithmics/03-a-short-history-of-agents-control-and-commitment.html"}</script>
 
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="02-mathematical-foundations.html" rel="prev">&laquo; Mathematical Foundations</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="04-formal-semantics-types-and-contracts.html" rel="next">Formal Semantics, Types, and Contracts &raquo;</a></div>
+<div id="top"><button id="theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="02-mathematical-foundations.html" rel="prev">&laquo; Mathematical Foundations</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="04-formal-semantics-types-and-contracts.html" rel="next">Formal Semantics, Types, and Contracts &raquo;</a></div>
 <h1 id="ch:history"><span class="part">Part I: Foundations</span>Chapter 3. A Short History of Agents, Control, and Commitment</h1><p>In 1979 a database researcher worried about a bank transfer that debits one account and crashes before crediting the other. In 2026 an engineer worries about an agent that charges a card and crashes before recording the order. These are the same problem, and the first of the two people had a protocol for it.</p>
 <p>Modern agents appear new. They are language-driven, tool-using, autonomous, and adaptive, and they arrived quickly enough that the field has largely been reinventing rather than reading. Their characteristic failures, however, were catalogued and largely solved in other disciplines, some of them decades ago: runaway resource consumption, oscillation, acting on stale state, committing to work that cannot be undone.</p>
 <p>This chapter surveys that inheritance. It is deliberately incomplete. Its purpose is to show where each of the following chapters obtained its ideas and to make the case that the failures now observed in production are older than they look. It is also the one chapter that can be skipped. Nothing later depends on it, and each borrowed mechanism is developed fully at its point of use. Terms are explained where they first appear, so no background in control theory or transaction processing is assumed. Figure <a href="#fig:traditions">3.1</a> summarizes the five traditions and what each contributed.</p>
@@ -197,5 +198,17 @@
 <span class="counter">Visitors: <img src="https://hits.sh/krimler.github.io/agent-algorithmics.svg?label=visitors&amp;color=1f5ac4" alt="visitor counter" height="20"></span></div>
 </div>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById('theme-toggle');
+  function apply(t) { root.setAttribute('data-theme', t); btn.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; }
+  var saved = null; try { saved = localStorage.getItem('theme'); } catch (e) {}
+  apply(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  btn.addEventListener('click', function () {
+    var t = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    apply(t); try { localStorage.setItem('theme', t); } catch (e) {}
+  });
+})();
+</script>
 </body>
 </html>

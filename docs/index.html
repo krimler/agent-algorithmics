@@ -19,13 +19,14 @@
 <meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
 <link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/">
+<script>try{var t=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Book", "name": "Agent Algorithmics", "alternativeHeadline": "Principles for Cost, Reliability, and Safety in Tool-Using AI Systems", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "inLanguage": "en", "datePublished": "2026", "image": "https://krimler.github.io/agent-algorithmics/cover-front.jpg", "numberOfPages": 304, "bookFormat": "https://schema.org/EBook", "url": "https://krimler.github.io/agent-algorithmics/"}</script>
 
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="preface.html" rel="next">Preface &raquo;</a></div>
+<div id="top"><button id="theme-toggle" type="button" aria-label="Toggle dark mode">Dark mode</button><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="preface.html" rel="next">Preface &raquo;</a></div>
 <h1>Agent Algorithmics<span class="part" style="text-transform:none;letter-spacing:0">Principles for Cost, Reliability, and Safety in Tool-Using AI Systems</span></h1>
 <p><i>Madhava Gaikwad</i></p>
 <img src="cover-front.jpg" alt="Front cover of Agent Algorithmics" style="float:right;width:38%;max-width:260px;margin:0 0 1em 1.5em;border:1px solid #999">
@@ -63,5 +64,17 @@ Also available as a single <a href="agent-algorithmics.pdf">PDF</a>.</p>
 <span class="counter">Visitors: <img src="https://hits.sh/krimler.github.io/agent-algorithmics.svg?label=visitors&amp;color=1f5ac4" alt="visitor counter" height="20"></span></div>
 </div>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+<script>
+(function () {
+  var root = document.documentElement, btn = document.getElementById('theme-toggle');
+  function apply(t) { root.setAttribute('data-theme', t); btn.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; }
+  var saved = null; try { saved = localStorage.getItem('theme'); } catch (e) {}
+  apply(saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  btn.addEventListener('click', function () {
+    var t = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    apply(t); try { localStorage.setItem('theme', t); } catch (e) {}
+  });
+})();
+</script>
 </body>
 </html>

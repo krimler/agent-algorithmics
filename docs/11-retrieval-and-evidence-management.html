@@ -83,7 +83,7 @@
 <h3 id="the-rag-architecture">11.1.2 The RAG Architecture</h3>
 <p>Retrieval-augmented generation (RAG) [<a href="#ref-lewis2020rag">11</a>] integrates retrieval with inference. The canonical pipeline, shown in Figure <a href="#fig:rag-pipeline">11.1</a>, has four stages: <em>index</em> the corpus into retrievable representations, <em>retrieve</em> the <span class="math inline">\(k\)</span> most relevant documents for a query, <em>augment</em> the model’s context with the retrieved content, and <em>generate</em> an answer grounded in that evidence.</p>
 <figure id="fig:rag-pipeline">
-<img src="figures/11-retrieval-and-evidence-management-fig1-203ac5ff72.png" />
+<img src="figures/11-retrieval-and-evidence-management-fig1-203ac5ff72.png" alt="Figure 11.1. The retrieval-augmented generation pipeline, with the characteristic failure of each stage. A wrong answer at the end can originate at any of the four." loading="lazy">
 <figcaption><strong>Figure 11.1.</strong> The retrieval-augmented generation pipeline, with the characteristic failure of each stage. A wrong answer at the end can originate at any of the four.</figcaption>
 </figure>
 <p>RAG addresses the basic limitation of parametric knowledge. Rather than increasing model size to memorize more facts, it externalizes knowledge and supplies it on demand, which allows access to current information, proprietary data, and domain knowledge without retraining. RAG systems have evolved beyond single-shot retrieval: advanced pipelines add query rewriting, reranking, and iterative refinement; modular RAG decomposes the pipeline into interchangeable components; and agentic RAG [<a href="#ref-agenticrag2025">1</a>] introduces autonomous decisions over when and how to retrieve, adapting retrieval depth to task complexity.</p>
@@ -98,7 +98,7 @@
 <h3 id="late-interaction-and-reranking">11.2.4 Late Interaction and Reranking</h3>
 <p>Initial retrieval emphasizes recall; reranking emphasizes precision. Cross-encoders jointly encode query and document, <span class="math inline">\(s_{\text{rerank}}(q,d) = \text{CrossEncoder}([q; d])\)</span>, achieving high accuracy at high cost. Late-interaction models such as ColBERT [<a href="#ref-colbert">4</a>] approximate this efficiently by computing token-level similarities. The standard cascade, shown in Figure <a href="#fig:retrieval-funnel">11.2</a>, retrieves a broad candidate set cheaply and applies the expensive model only to promising candidates.</p>
 <figure id="fig:retrieval-funnel">
-<img src="figures/11-retrieval-and-evidence-management-fig2-22f5bb9b52.png" />
+<img src="figures/11-retrieval-and-evidence-management-fig2-22f5bb9b52.png" alt="Figure 11.2. The retrieval funnel. Cheap retrievers cast a wide net; an expensive reranker narrows it to the few documents that enter the context. Precision at the bottom of the funnel is what the model sees." loading="lazy">
 <figcaption><strong>Figure 11.2.</strong> The retrieval funnel. Cheap retrievers cast a wide net; an expensive reranker narrows it to the few documents that enter the context. Precision at the bottom of the funnel is what the model sees.</figcaption>
 </figure>
 <h2 id="chunking-the-retrieval-unit">11.3 Chunking: The Retrieval Unit</h2>
@@ -161,7 +161,7 @@
 <h3 id="error-compounding-across-hops">11.6.2 Error Compounding Across Hops</h3>
 <p>Multi-hop retrieval has a failure mode that single-shot retrieval lacks: a mistake at hop one becomes the query for hop two. The CHARM framework characterizes this cascading hallucination in agentic RAG and proposes detection that operates across the hop chain rather than on any single output [<a href="#ref-charm2026">24</a>]. Figure <a href="#fig:multihop">11.3</a> shows the mechanism and the remedy. The practical implication is a gate (Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a>) at each hop boundary rather than only at the end. Evidence quality should be checked before it becomes the basis for the next retrieval, because by the final answer the error has been laundered through three steps of plausible reasoning and no longer looks like a retrieval failure.</p>
 <figure id="fig:multihop">
-<img src="figures/11-retrieval-and-evidence-management-fig3-7e0c3a774f.png" />
+<img src="figures/11-retrieval-and-evidence-management-fig3-7e0c3a774f.png" alt="Figure 11.3. Multi-hop retrieval with a gate at each hop boundary. Without the gates, an error at hop 1 is carried forward as the premise of hops 2 and 3 and surfaces at the end as a confident, well-reasoned wrong answer." loading="lazy">
 <figcaption><strong>Figure 11.3.</strong> Multi-hop retrieval with a gate at each hop boundary. Without the gates, an error at hop 1 is carried forward as the premise of hops 2 and 3 and surfaces at the end as a confident, well-reasoned wrong answer.</figcaption>
 </figure>
 <h3 id="retrieval-as-an-attack-surface">11.6.3 Retrieval as an Attack Surface</h3>

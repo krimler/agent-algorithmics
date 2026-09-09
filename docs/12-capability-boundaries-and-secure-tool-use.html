@@ -90,7 +90,7 @@
 <p>Most agents operate at Ring 2 or 3. Ring 4 is useful for testing and for processing untrusted content. The principle is that an agent should operate at the highest ring number, the lowest privilege, that permits task completion. The hierarchy clarifies what must be impossible. A Ring 3 agent may reason about actions and cannot take them, and if it can induce a Ring 2 agent to take actions without an explicit, validated handoff, the hierarchy has collapsed. The ring boundary must be enforced by code rather than by convention.</p>
 <p>A practical pattern is <em>two-stage execution</em>, shown in Figure <a href="#fig:two-stage">12.1</a>: a low-privilege stage ingests untrusted content, extracts candidate intents, and proposes actions; a higher-privilege stage validates those intents against capabilities and executes only those that pass. This is the agentic form of privilege separation in operating-system design.</p>
 <figure id="fig:two-stage">
-<img src="figures/12-capability-boundaries-and-secure-tool-use-fig1-b33bd0c4c1.png" />
+<img src="figures/12-capability-boundaries-and-secure-tool-use-fig1-b33bd0c4c1.png" alt="Figure 12.1. Two-stage execution. The stage that reads untrusted content holds no capabilities; it can only produce a proposed intent. The stage that holds capabilities never reads untrusted content directly. An injection can persuade the first stage and still cannot reach a tool." loading="lazy">
 <figcaption><strong>Figure 12.1.</strong> Two-stage execution. The stage that reads untrusted content holds no capabilities; it can only produce a proposed intent. The stage that holds capabilities never reads untrusted content directly. An injection can persuade the first stage and still cannot reach a tool.</figcaption>
 </figure>
 <h2 id="capability-tokens">12.2 Capability Tokens</h2>
@@ -114,7 +114,7 @@
 <p>Unforgeability is ensured by cryptographic signatures or message authentication codes over the immutable fields. Security also requires <em>binding</em>: a token is bound to a specific subject (the agent), a specific resource (the tool or tool server), and, where relevant, a specific environment (tenant, deployment, region). Without binding, tokens become portable artifacts that can be replayed across contexts.</p>
 <p>Capability systems derive their safety from <em>attenuation</em>: a derived capability must be weaker than its parent. This is easiest when constraints are monotone, so that adding a constraint only reduces the set of allowed actions. Non-monotone constraints such as “allow if amount <span class="math inline">\(&gt;\)</span> 1000” make attenuation hard to reason about and should be avoided. Figure <a href="#fig:attenuation">12.2</a> shows a delegation chain.</p>
 <figure id="fig:attenuation">
-<img src="figures/12-capability-boundaries-and-secure-tool-use-fig2-1a800d1834.png" />
+<img src="figures/12-capability-boundaries-and-secure-tool-use-fig2-1a800d1834.png" alt="Figure 12.2. Attenuated delegation. Authority only narrows as it passes down the chain. Delegation that passes the parent’s full authority to a sub-agent is the most common way this property is lost." loading="lazy">
 <figcaption><strong>Figure 12.2.</strong> Attenuated delegation. Authority only narrows as it passes down the chain. Delegation that passes the parent’s full authority to a sub-agent is the most common way this property is lost.</figcaption>
 </figure>
 <h3 id="token-lifecycle">12.2.2 Token Lifecycle</h3>
@@ -136,7 +136,7 @@
 <h3 id="the-lethal-trifecta">12.3.2 The Lethal Trifecta</h3>
 <p>Willison [<a href="#ref-willison2025">16</a>] identifies a “lethal trifecta” for agent security, shown in Figure <a href="#fig:trifecta">12.3</a>: access to <em>private data</em>, exposure to <em>untrusted content</em>, and the ability to <em>communicate externally</em>. An agent with all three can be weaponized for data exfiltration. The defense is architectural: ensure that no agent has all three at once. Remove one leg and the trifecta collapses.</p>
 <figure id="fig:trifecta">
-<img src="figures/12-capability-boundaries-and-secure-tool-use-fig3-aca6ea729e.png" />
+<img src="figures/12-capability-boundaries-and-secure-tool-use-fig3-aca6ea729e.png" alt="Figure 12.3. The lethal trifecta [16]. Each property is harmless on its own and useful in pairs. The combination of all three in one agent is what an attacker needs, and the defense is to make sure no single agent has it." loading="lazy">
 <figcaption><strong>Figure 12.3.</strong> The lethal trifecta [<a href="#ref-willison2025">16</a>]. Each property is harmless on its own and useful in pairs. The combination of all three in one agent is what an attacker needs, and the defense is to make sure no single agent has it.</figcaption>
 </figure>
 <p>This is enforceable rather than aspirational. If the agent ingests untrusted content, run it in a ring where external communication is disabled. If the agent must communicate externally, ensure it cannot see private data, only redacted or scoped data. If the agent must see private data and communicate externally, ensure it never processes untrusted content, or interpose an explicit mediation layer.</p>
@@ -239,7 +239,7 @@ transfer_external = Capability(
 <h3 id="defense-layers">12.9.2 Defense Layers</h3>
 <p>Figure <a href="#fig:defense-layers">12.4</a> shows the five layers. Input validation separates system prompt from user input, detects known injection signatures, and classifies intent. Capability enforcement validates the token for the requested operation, checks amount limits, rate limits, and the recipient allowlist, and rejects on any violation. Human approval is required for every external transfer and for internal transfers over $5<span>,</span>000, with an interface that shows amount, recipient, account, and stated purpose. Execution isolation routes financial API calls through an authenticated, audited channel with no direct database access and tamper-evident transaction logging. Output validation verifies the response schema, checks for leakage of full account numbers or identity numbers, and runs anomaly detection on response patterns.</p>
 <figure id="fig:defense-layers">
-<img src="figures/12-capability-boundaries-and-secure-tool-use-fig4-d1b966cb67.png" />
+<img src="figures/12-capability-boundaries-and-secure-tool-use-fig4-d1b966cb67.png" alt="Figure 12.4. Defense in depth for the financial agent. A single injection has to pass every layer to produce an unauthorized transfer, and the layers fail in different ways." loading="lazy">
 <figcaption><strong>Figure 12.4.</strong> Defense in depth for the financial agent. A single injection has to pass every layer to produce an unauthorized transfer, and the layers fail in different ways.</figcaption>
 </figure>
 <h3 id="attack-scenarios">12.9.3 Attack Scenarios</h3>

@@ -47,7 +47,7 @@
 <p>The Lagrangian formulation is principled and is not directly usable at runtime. Computing or adapting <span class="math inline">\(\lambda\)</span> requires solving a dual optimization problem or learning a policy over long horizons, and both are expensive and brittle.</p>
 <p>We instead approximate the Lagrangian trade-off with a simpler quantity, <em>slack</em>, which measures how much budget remains after accounting for the expected cost of finishing the task. Let <span class="math inline">\(\hat{R}_t\)</span> be the estimated cost of completing the task from state <span class="math inline">\(s_t\)</span>. The slack at time <span class="math inline">\(t\)</span> is <span class="math display">\[\Delta_t = B_t - \hat{R}_t.\]</span> Slack has a direct operational reading. When <span class="math inline">\(\Delta_t\)</span> is large and positive, the agent has surplus resources and can afford expensive, high-quality actions. When <span class="math inline">\(\Delta_t\)</span> is small or negative, the agent is at risk of exhausting its budget before completion and must act conservatively. The approximation replaces an abstract shadow price with a concrete, state-dependent signal that can be computed cheaply. Figure <a href="#fig:slack-damping">7.1</a> shows how the score of an action is damped as slack falls.</p>
 <figure id="fig:slack-damping">
-<img src="figures/07-action-selection-under-budgets-fig1-4a3e718414.png" />
+<img src="figures/07-action-selection-under-budgets-fig1-4a3e718414.png" alt="Figure 7.1. Slack damping. With positive slack, an action’s value density is scaled down in proportion to how much of the surplus it would consume, reaching full weight once the slack covers its cost. With negative slack, an exponential penalty drives expensive actions out of consideration." loading="lazy">
 <figcaption><strong>Figure 7.1.</strong> Slack damping. With positive slack, an action’s value density is scaled down in proportion to how much of the surplus it would consume, reaching full weight once the slack covers its cost. With negative slack, an exponential penalty drives expensive actions out of consideration.</figcaption>
 </figure>
 <figure>
@@ -57,7 +57,7 @@
 <h2 id="model-cascades-and-routing">7.4 Model Cascades and Routing</h2>
 <p>Budget-aware selection matters most when the actions are model invocations. Modern systems offer families of models with sharply different cost and capability profiles, and using the strongest model everywhere is rarely optimal. Dekoninck et al. [<a href="#ref-dekoninck2025cascade">4</a>] distinguish three architectures for cost-aware model use, shown in Figure <a href="#fig:cascade-routing">7.2</a>: cascading, routing, and cascade routing.</p>
 <figure id="fig:cascade-routing">
-<img src="figures/07-action-selection-under-budgets-fig2-6cb45d433f.png" />
+<img src="figures/07-action-selection-under-budgets-fig2-6cb45d433f.png" alt="Figure 7.2. Three architectures for cost-aware model use. A cascade tries models in cost order and escalates on a low score. A router chooses one model up front. Cascade routing may route to any model at each step and continue conditionally, which removes the requirement that early decisions be final." loading="lazy">
 <figcaption><strong>Figure 7.2.</strong> Three architectures for cost-aware model use. A cascade tries models in cost order and escalates on a low score. A router chooses one model up front. Cascade routing may route to any model at each step and continue conditionally, which removes the requirement that early decisions be final.</figcaption>
 </figure>
 <h3 id="cascading">7.4.1 Cascading</h3>
@@ -153,7 +153,7 @@
 <h2 id="the-full-selection-pipeline">7.8 The Full Selection Pipeline</h2>
 <p>Production systems combine estimation, filtering, and scoring into a fast decision pipeline, shown in Figure <a href="#fig:selection-pipeline">7.3</a>.</p>
 <figure id="fig:selection-pipeline">
-<img src="figures/07-action-selection-under-budgets-fig3-38cbd6db1b.png" />
+<img src="figures/07-action-selection-under-budgets-fig3-38cbd6db1b.png" alt="Figure 7.3. The selection pipeline. Estimation and reservation set the slack; filtering removes what cannot be afforded or cannot finish in time; ranking chooses among the survivors. The filter runs before the model is prompted." loading="lazy">
 <figcaption><strong>Figure 7.3.</strong> The selection pipeline. Estimation and reservation set the slack; filtering removes what cannot be afforded or cannot finish in time; ranking chooses among the survivors. The filter runs before the model is prompted.</figcaption>
 </figure>
 <figure>

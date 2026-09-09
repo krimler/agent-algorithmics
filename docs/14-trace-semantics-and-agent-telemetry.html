@@ -95,7 +95,7 @@
 <h3 id="example-trace">14.2.3 Example Trace</h3>
 <p>Figure <a href="#fig:span-dag">14.1</a> shows the trace of a retrieval-augmented agent answering a question.</p>
 <figure id="fig:span-dag">
-<img src="figures/14-trace-semantics-and-agent-telemetry-fig1-7ee7c5cf89.png" />
+<img src="figures/14-trace-semantics-and-agent-telemetry-fig1-7ee7c5cf89.png" alt="Figure 14.1. A span tree for one request. Each child is an operation the agent performed as part of the root; durations and token counts on the spans make latency and cost attribution arithmetic." loading="lazy">
 <figcaption><strong>Figure 14.1.</strong> A span tree for one request. Each child is an operation the agent performed as part of the root; durations and token counts on the spans make latency and cost attribution arithmetic.</figcaption>
 </figure>
 <p>The trace supports several classes of question. Latency decomposition: answer generation dominates at 1.2 s. Token accounting: 2<span>,</span>650 input tokens and 350 output tokens. Pipeline correctness: retrieval returned five results, so a low-quality answer points at retrieval quality. Change analysis: comparing across prompt versions shows whether query-understanding tokens grew because the system prompt lengthened. A robust trace would also record the prompt and policy versions, the retrieval corpus version, and evaluation events attaching groundedness and relevance scores.</p>
@@ -111,7 +111,7 @@
 <h3 id="the-opentelemetry-pipeline">14.3.2 The OpenTelemetry Pipeline</h3>
 <p>OpenTelemetry defines a standard pipeline, shown in Figure <a href="#fig:otel-pipeline">14.2</a>: application, SDK, processor, exporter, collector, backend.</p>
 <figure id="fig:otel-pipeline">
-<img src="figures/14-trace-semantics-and-agent-telemetry-fig2-9515190ff7.png" />
+<img src="figures/14-trace-semantics-and-agent-telemetry-fig2-9515190ff7.png" alt="Figure 14.2. The OpenTelemetry pipeline. Sensitive transformations belong in the collector, which is centralized and auditable, rather than only in application code, which is heterogeneous." loading="lazy">
 <figcaption><strong>Figure 14.2.</strong> The OpenTelemetry pipeline. Sensitive transformations belong in the collector, which is centralized and auditable, rather than only in application code, which is heterogeneous.</figcaption>
 </figure>
 <p>The SDK manages span lifecycle, context propagation, attribute typing, and batching and sampling hooks. Processors operate on the stream: a batch processor reduces overhead, a sampling processor reduces volume, a redaction processor removes sensitive fields, and an enrichment processor adds deployment metadata such as region, build, and prompt version. Exporters send telemetry, with OTLP as the default. The collector centralizes policy, fanning out to backends and enforcing organization-wide sampling and redaction. Backends store and query, with different backends for different pillars. The key operational pattern is to perform sensitive transformations in the collector rather than only in application code.</p>
@@ -129,7 +129,7 @@
 <p>Observability earns its cost when it supports causal diagnosis: what caused a failure and what would have prevented it, beyond what happened.</p>
 <p>For agents there is a specific reason this is hard. The step where an error <em>surfaces</em> is usually not the step that <em>caused</em> it. A wrong answer at step 30 traces back to a document misranked at step 4, and everything between is locally reasonable inference from a bad premise. Figure <a href="#fig:error-origin">14.3</a> shows the pattern. Latency attribution is a solved problem borrowed from distributed tracing; failure attribution is an active research area.</p>
 <figure id="fig:error-origin">
-<img src="figures/14-trace-semantics-and-agent-telemetry-fig3-da4522ed5e.png" />
+<img src="figures/14-trace-semantics-and-agent-telemetry-fig3-da4522ed5e.png" alt="Figure 14.3. Error origin and error surface. The failure appears at step 30; the decisive mistake occurred at step 4. A method that inspects the failing step in isolation attributes the failure to the wrong place." loading="lazy">
 <figcaption><strong>Figure 14.3.</strong> Error origin and error surface. The failure appears at step 30; the decisive mistake occurred at step 4. A method that inspects the failing step in isolation attributes the failure to the wrong place.</figcaption>
 </figure>
 <h3 id="causal-chains">14.5.1 Causal Chains</h3>

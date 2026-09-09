@@ -38,7 +38,7 @@
 <h3 id="constraint-hierarchy">13.1.3 Constraint Hierarchy</h3>
 <p>Constraints are not equal. Real systems impose several layers of requirement with different priorities, and the priorities must be explicit and enforceable. Figure <a href="#fig:constraint-hierarchy">13.1</a> shows the standard ordering.</p>
 <figure id="fig:constraint-hierarchy">
-<img src="figures/13-alignment-policies-and-constraint-enforcement-fig1-86cf193d96.png" />
+<img src="figures/13-alignment-policies-and-constraint-enforcement-fig1-86cf193d96.png" alt="Figure 13.1. The constraint hierarchy. Higher levels are non-negotiable with respect to lower ones. The ordering removes ambiguity during conflicts and makes resolution deterministic." loading="lazy">
 <figcaption><strong>Figure 13.1.</strong> The constraint hierarchy. Higher levels are non-negotiable with respect to lower ones. The ordering removes ambiguity during conflicts and makes resolution deterministic.</figcaption>
 </figure>
 <p>The hierarchy is lexicographic. An agent must never violate safety to satisfy user intent, and must never violate compliance to improve efficiency. Lower priorities are optimized only after higher ones are satisfied.</p>
@@ -63,7 +63,7 @@ Rule   { id: RuleID, priority: Priority, conditions: List&lt;Condition&gt;,
 <h3 id="the-guardrail-architecture">13.4.1 The Guardrail Architecture</h3>
 <p>Guardrails wrap the agent in enforcement layers that consult a shared policy engine, as Figure <a href="#fig:guardrails">13.2</a> shows. Input and output guards apply symmetric checks, and every decision is written to an audit log.</p>
 <figure id="fig:guardrails">
-<img src="figures/13-alignment-policies-and-constraint-enforcement-fig2-58810c6e78.png" />
+<img src="figures/13-alignment-policies-and-constraint-enforcement-fig2-58810c6e78.png" alt="Figure 13.2. The guardrail architecture. Alignment logic lives outside the agent’s reasoning, in a policy engine that the input guard, execution gate, and output guard all consult. The engine can be tested and updated independently of the model." loading="lazy">
 <figcaption><strong>Figure 13.2.</strong> The guardrail architecture. Alignment logic lives outside the agent’s reasoning, in a policy engine that the input guard, execution gate, and output guard all consult. The engine can be tested and updated independently of the model.</figcaption>
 </figure>
 <p>The architectural payoff is that alignment logic lives outside agent reasoning, which buys three things. The policy engine can be tested independently, with its own test suite, against inputs the agent will never generate. Policies can be updated without redeploying or retraining the agent. And enforcement holds regardless of what the agent concluded internally, which is the only property that survives an adversarial input.</p>

@@ -133,7 +133,7 @@
 <h3 id="adding-abstention">9.2.3 Adding Abstention</h3>
 <p>Abstention (deferral, escalation) costs <span class="math inline">\(c_a\)</span>, which may include human review, delay, or the cost of an incomplete task. Unlike refusal, abstention may eventually lead to execution after more information is gathered. The optimal policy partitions the confidence axis into four regions, shown in Figure <a href="#fig:confidence-regions">9.1</a>.</p>
 <figure id="fig:confidence-regions">
-<img src="figures/09-risk-aware-gates-verification-abstention-refusal-fig1-a32c538a11.png" />
+<img src="figures/09-risk-aware-gates-verification-abstention-refusal-fig1-a32c538a11.png" alt="Figure 9.1. The four gate regions along the confidence axis. The thresholds are functions of the costs, and each action class has its own set, since a privileged action has a far larger \(c_e\) than a read." loading="lazy">
 <figcaption><strong>Figure 9.1.</strong> The four gate regions along the confidence axis. The thresholds are functions of the costs, and each action class has its own set, since a privileged action has a far larger <span class="math inline">\(c_e\)</span> than a read.</figcaption>
 </figure>
 <p>The thresholds depend on the cost structure: <span class="math display">\[\begin{align*}
@@ -192,7 +192,7 @@
 <h3 id="verification-composition">9.3.2 Verification Composition</h3>
 <p>Several verification stages can be composed into a cascade, ordered by cost, as Figure <a href="#fig:verifier-cascade">9.2</a> shows: fast syntactic checks first (milliseconds), semantic constraint checks next (tens of milliseconds), model-based safety checks after that (hundreds of milliseconds), execution tests (seconds), and finally human review (minutes to hours).</p>
 <figure id="fig:verifier-cascade">
-<img src="figures/09-risk-aware-gates-verification-abstention-refusal-fig2-36991213f3.png" />
+<img src="figures/09-risk-aware-gates-verification-abstention-refusal-fig2-36991213f3.png" alt="Figure 9.2. A verification cascade. Cheap checks with high recall run first and reject hard failures; expensive checks run only on what survives. Running a model-based safety classifier on JSON that does not parse is pure waste." loading="lazy">
 <figcaption><strong>Figure 9.2.</strong> A verification cascade. Cheap checks with high recall run first and reject hard failures; expensive checks run only on what survives. Running a model-based safety classifier on JSON that does not parse is pure waste.</figcaption>
 </figure>
 <p>Early stages should have high recall even at the cost of precision; later stages refine the decision with higher precision. The cascade minimizes expected verification cost while maintaining safety. Two rules govern the ordering: hard failures (parse errors, schema violations, missing parameters) go early, and soft failures (suspicious intent, borderline safety, ambiguous semantics) go late.</p>
@@ -247,7 +247,7 @@
 <h3 id="sequential-gate-pipelines">9.8.1 Sequential Gate Pipelines</h3>
 <p>When gates are arranged in sequence, each sees only the actions that passed the previous ones, so <span class="math display">\[P(\text{Execute}) = P(\text{Pass}_1) \cdot P(\text{Pass}_2 \mid \text{Pass}_1) \cdots P(\text{Pass}_n \mid \text{Pass}_{1..n-1}).\]</span> If each gate passes 90% of valid actions, a five-gate pipeline passes only <span class="math inline">\(0.9^5 \approx 59\%\)</span> of them. Figure <a href="#fig:gate-recall">9.3</a> shows how quickly the product falls. Gate pipelines should be designed to minimize false refusals while maintaining safety.</p>
 <figure id="fig:gate-recall">
-<img src="figures/09-risk-aware-gates-verification-abstention-refusal-fig3-ffa20307aa.png" />
+<img src="figures/09-risk-aware-gates-verification-abstention-refusal-fig3-ffa20307aa.png" alt="Figure 9.3. Recall multiplies across sequential gates. Eight gates at 90% each pass only 43% of valid actions; the same eight at 98% pass 85%. Redundant gates that check the same failure mode pay this cost without adding safety." loading="lazy">
 <figcaption><strong>Figure 9.3.</strong> Recall multiplies across sequential gates. Eight gates at 90% each pass only 43% of valid actions; the same eight at 98% pass 85%. Redundant gates that check the same failure mode pay this cost without adding safety.</figcaption>
 </figure>
 <p>Sequential gates should be as orthogonal as possible. If two gates check the same failure mode, for instance two model-based safety classifiers, the system pays twice and gains little. Sequence deterministic checks first, then semantic checks, then expensive checks. If the product requires an overall valid-action pass rate of at least <span class="math inline">\(\rho\)</span> across <span class="math inline">\(n\)</span> gates with recalls <span class="math inline">\(r_i\)</span>, then <span class="math inline">\(\prod_{i=1}^n r_i \geq \rho\)</span>, which is the justification for removing redundant gates: overall recall collapses multiplicatively.</p>

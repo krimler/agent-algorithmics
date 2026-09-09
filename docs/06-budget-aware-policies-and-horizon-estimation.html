@@ -29,7 +29,7 @@
 <h1 id="ch:budgets"><span class="part">Part I: Foundations</span>Chapter 6. Budget-Aware Policies and Horizon Estimation</h1><p>Give an agent twice the budget and it will usually get no further. Often it gets no further at all.</p>
 <p>This is one of the more useful empirical findings of the past two years, and it deserves some attention, because it contradicts the natural assumption that resources are the binding constraint. A budget-unaware agent spends early on whatever looks locally promising, reaches a performance ceiling well before the budget is exhausted, and then spends the remainder on exploration that changes nothing. Doubling its allowance doubles the waste. Agents that can <em>see</em> their budget continue to convert additional resources into additional accuracy, and reach comparable accuracy on far less [<a href="#ref-bats2025">3</a>, <a href="#ref-budgettooluse2026">11</a>]. Figure <a href="#fig:budget-scaling">6.1</a> shows the shape of the two curves.</p>
 <figure id="fig:budget-scaling">
-<img src="figures/06-budget-aware-policies-and-horizon-estimation-fig1-891ad87340.png" />
+<img src="figures/06-budget-aware-policies-and-horizon-estimation-fig1-891ad87340.png" alt="Figure 6.1. Accuracy as a function of budget, in the shape reported by [3, 11]. The budget-blind agent reaches its ceiling with most of the budget unspent; the budget-aware agent, with the same model and tools, continues to improve as the allowance grows." loading="lazy">
 <figcaption><strong>Figure 6.1.</strong> Accuracy as a function of budget, in the shape reported by [<a href="#ref-bats2025">3</a>, <a href="#ref-budgettooluse2026">11</a>]. The budget-blind agent reaches its ceiling with most of the budget unspent; the budget-aware agent, with the same model and tools, continues to improve as the allowance grows.</figcaption>
 </figure>
 <p>Same models, same tools. The difference is that one of them carries the budget in its state.</p>
@@ -78,7 +78,7 @@
 <p>These thresholds are task-dependent. For tasks with predictable step counts and uniform costs, evenly spaced thresholds suffice. Tasks with high variance in step cost require more conservative thresholds to avoid a late collapse.</p>
 <p>A more principled calibration compares the remaining budget to the estimated remaining cost. Let <span class="math inline">\(M\)</span> be the median estimate of the remaining cost. The ratio <span class="math inline">\(B/M\)</span> is a normalized signal, and Figure <a href="#fig:budget-bands">6.2</a> shows the four states in its terms: abundant when <span class="math inline">\(B/M &gt; 2\)</span>, adequate when <span class="math inline">\(1 &lt; B/M \leq 2\)</span>, tight when <span class="math inline">\(0.5 &lt; B/M \leq 1\)</span>, and critical when <span class="math inline">\(B/M \leq 0.5\)</span>. This formulation adapts across tasks with different absolute cost scales, since “tight” means the same thing on a three-step lookup and a thirty-step investigation.</p>
 <figure id="fig:budget-bands">
-<img src="figures/06-budget-aware-policies-and-horizon-estimation-fig2-3307f338c3.png" />
+<img src="figures/06-budget-aware-policies-and-horizon-estimation-fig2-3307f338c3.png" alt="Figure 6.2. Budget states normalized by the estimated remaining cost. The boundaries are ratios rather than absolute amounts, so the same policy applies to tasks of very different size." loading="lazy">
 <figcaption><strong>Figure 6.2.</strong> Budget states normalized by the estimated remaining cost. The boundaries are ratios rather than absolute amounts, so the same policy applies to tasks of very different size.</figcaption>
 </figure>
 <h3 id="action-space-filtering">6.1.3 Action Space Filtering</h3>
@@ -134,7 +134,7 @@ Budget Policy:
 <h3 id="budget-reservation">6.1.5 Budget Reservation</h3>
 <p>A central problem is how much budget to reserve for future steps. A naive reservation multiplies the expected remaining steps <span class="math inline">\(T\)</span> by the average per-step cost <span class="math inline">\(\bar{c}\)</span>, giving <span class="math inline">\(\text{Reserve} = T \cdot \bar{c}\)</span>. Because both quantities are uncertain, robust systems reserve a higher percentile of the remaining-cost distribution, such as the 75th. This reduces the chance of failure at the cost of occasional under-utilization. Figure <a href="#fig:reservation">6.3</a> shows how the budget divides.</p>
 <figure id="fig:reservation">
-<img src="figures/06-budget-aware-policies-and-horizon-estimation-fig3-c0c800a8fb.png" />
+<img src="figures/06-budget-aware-policies-and-horizon-estimation-fig3-c0c800a8fb.png" alt="Figure 6.3. Budget reservation. Of the remaining budget \(B_t\), the reserve \(R_t\) is held back for the mandatory finish; only the slack \(\Delta_t = B_t - R_t\) is available for the next action." loading="lazy">
 <figcaption><strong>Figure 6.3.</strong> Budget reservation. Of the remaining budget <span class="math inline">\(B_t\)</span>, the reserve <span class="math inline">\(R_t\)</span> is held back for the mandatory finish; only the slack <span class="math inline">\(\Delta_t = B_t - R_t\)</span> is available for the next action.</figcaption>
 </figure>
 <p>Adaptive reservation recomputes the estimate after each step:</p>

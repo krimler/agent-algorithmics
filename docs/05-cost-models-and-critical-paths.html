@@ -112,14 +112,14 @@
 <h2 id="cost-decomposition">5.2 Cost Decomposition</h2>
 <p>Agent cost decomposes into components with distinct behaviors and distinct optimizations, shown in Figure <a href="#fig:cost-tree">5.1</a>.</p>
 <figure id="fig:cost-tree">
-<img src="figures/05-cost-models-and-critical-paths-fig1-3e50f75386.png" />
+<img src="figures/05-cost-models-and-critical-paths-fig1-3e50f75386.png" alt="Figure 5.1. Cost decomposition. Each component responds to a different intervention, which is why an unattributed total cannot be optimized." loading="lazy">
 <figcaption><strong>Figure 5.1.</strong> Cost decomposition. Each component responds to a different intervention, which is why an unattributed total cannot be optimized.</figcaption>
 </figure>
 <h3 id="token-costs">5.2.1 Token Costs</h3>
 <p>Token costs dominate most agent workloads: <span class="math display">\[C_{\text{tokens}} = \sum_{i=1}^{n} \left( T_{\text{in}}^{(i)} p_{\text{in}} + T_{\text{out}}^{(i)} p_{\text{out}} \right),\]</span> where <span class="math inline">\(n\)</span> is the number of model calls and <span class="math inline">\(p_{\text{in}}\)</span>, <span class="math inline">\(p_{\text{out}}\)</span> are the per-token prices.</p>
 <p>In a multi-turn interaction, the input to each call includes the whole history so far: <span class="math display">\[T_{\text{in}}^{(i)} = T_{\text{system}} + \sum_{j=1}^{i-1} \left( T_{\text{user}}^{(j)} + T_{\text{assistant}}^{(j)} \right) + T_{\text{user}}^{(i)}.\]</span> This replay makes total token usage grow quadratically in the number of turns. A 20-turn conversation with 500 tokens per turn produces about 100<span>,</span>000 input tokens across all calls, although only 10<span>,</span>000 tokens were ever written. Figure <a href="#fig:replay">5.2</a> shows the growth.</p>
 <figure id="fig:replay">
-<img src="figures/05-cost-models-and-critical-paths-fig2-533ca581d4.png" />
+<img src="figures/05-cost-models-and-critical-paths-fig2-533ca581d4.png" alt="Figure 5.2. History replay. With 500 tokens per turn, the text written grows linearly while the text the model reads, and is billed for, grows quadratically, because every call re-reads the entire history." loading="lazy">
 <figcaption><strong>Figure 5.2.</strong> History replay. With 500 tokens per turn, the text written grows linearly while the text the model reads, and is billed for, grows quadratically, because every call re-reads the entire history.</figcaption>
 </figure>
 <h3 id="tool-costs">5.2.2 Tool Costs</h3>
@@ -137,7 +137,7 @@
 <h3 id="critical-path-in-multi-agent-systems">5.3.3 Critical Path in Multi-Agent Systems</h3>
 <p>Multi-agent systems trade coordination overhead for parallelism. When <span class="math inline">\(k\)</span> agents run concurrently and an aggregator combines their results, <span class="math display">\[T_{\text{parallel}} = \max_i T_{\text{agent}_i} + T_{\text{aggregation}},\]</span> while the cost is the sum over all agents. Figure <a href="#fig:critical-path">5.3</a> illustrates the difference. The Anthropic research system [<a href="#ref-anthropicresearch2025">2</a>] exploits this structure to reduce latency on complex queries.</p>
 <figure id="fig:critical-path">
-<img src="figures/05-cost-models-and-critical-paths-fig3-69bd14abdb.png" />
+<img src="figures/05-cost-models-and-critical-paths-fig3-69bd14abdb.png" alt="Figure 5.3. Cost sums; latency follows the critical path. Running the three searches concurrently cuts wall-clock time from 12.5 to 7 seconds while the total work, and therefore the bill, is unchanged." loading="lazy">
 <figcaption><strong>Figure 5.3.</strong> Cost sums; latency follows the critical path. Running the three searches concurrently cuts wall-clock time from 12.5 to 7 seconds while the total work, and therefore the bill, is unchanged.</figcaption>
 </figure>
 <h3 id="latencycost-trade-offs">5.3.4 Latency–Cost Trade-offs</h3>
@@ -167,7 +167,7 @@
 <h3 id="multi-layer-caching-architecture">5.4.5 Multi-Layer Caching Architecture</h3>
 <p>Production systems layer all of these, cheapest check first, as Figure <a href="#fig:cache-layers">5.4</a> shows.</p>
 <figure id="fig:cache-layers">
-<img src="figures/05-cost-models-and-critical-paths-fig4-388f869d7a.png" />
+<img src="figures/05-cost-models-and-critical-paths-fig4-388f869d7a.png" alt="Figure 5.4. Three cache layers, each capturing a different redundancy. A workload with no repeated questions still benefits from the lower two, which is why the layers are tracked separately rather than as one hit rate." loading="lazy">
 <figcaption><strong>Figure 5.4.</strong> Three cache layers, each capturing a different redundancy. A workload with no repeated questions still benefits from the lower two, which is why the layers are tracked separately rather than as one hit rate.</figcaption>
 </figure>
 <p>Multi-agent systems complicate this picture. When several agents share a large context, naive cache reuse across candidates can change results rather than merely accelerate them, since the interaction between candidates carries information that reuse discards [<a href="#ref-kvreuse2026">17</a>]. Measure quality as well as hit rate.</p>
@@ -320,7 +320,7 @@
 <h2 id="the-costquality-frontier">5.8 The Cost–Quality Frontier</h2>
 <p>Plot every measured configuration with cost on one axis and quality on the other, as in Figure <a href="#fig:frontier">5.5</a>. Most points are dominated: some other configuration is both cheaper and better. The undominated points form the frontier, and the only interesting question is where on it to sit.</p>
 <figure id="fig:frontier">
-<img src="figures/05-cost-models-and-critical-paths-fig5-01534be00b.png" />
+<img src="figures/05-cost-models-and-critical-paths-fig5-01534be00b.png" alt="Figure 5.5. The configurations from the worked example. The baseline and the cached variant are dominated by the reranked one, which is cheaper and more accurate. The dashed line is the frontier: from there on, saving money costs accuracy, and the choice of point is a product decision." loading="lazy">
 <figcaption><strong>Figure 5.5.</strong> The configurations from the worked example. The baseline and the cached variant are dominated by the reranked one, which is cheaper and more accurate. The dashed line is the frontier: from there on, saving money costs accuracy, and the choice of point is a product decision.</figcaption>
 </figure>
 <p>Two properties make this harder than a standard Pareto analysis. The frontier moves: inference prices fall by roughly an order of magnitude per year for a fixed capability level [<a href="#ref-llmflation2024">5</a>, <a href="#ref-epochpricing2025">4</a>], so a configuration that is unaffordable today is routine within a year, and a sufficiently complex optimization can be obsolete before it finishes paying for itself. One should ask how long an optimization takes to build, maintain, and validate, against the possibility of buying the same saving by waiting. This argues for a specific bias: prefer optimizations that are cheap to build and architectural rather than clever. A cache-friendly prompt layout keeps paying. A hand-tuned distillation pipeline for one model version does not, and it becomes a liability when that model is deprecated. Build for the ability to swap in a cheaper model without changing the architecture, and let deflation do the work that deflation does well.</p>

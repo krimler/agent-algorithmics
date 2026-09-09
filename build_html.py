@@ -476,7 +476,7 @@ for i, ch in enumerate(chapters):
         cap = re.search(r"<figcaption[^>]*>(.*?)</figcaption>", block, re.S)
         alt = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", cap.group(1)))).strip() if cap else "figure"
         return re.sub(r'<img src="([^"]+)"[^>]*>', lambda im: f'<img src="{im.group(1)}" alt="{html.escape(alt)}" loading="lazy">', block)
-    inner = re.sub(r"<figure>.*?</figure>", altfix, inner, flags=re.S)
+    inner = re.sub(r"<figure[^>]*>.*?</figure>", altfix, inner, flags=re.S)
     # bibliography enumerate gets a class for styling
     inner = re.sub(r'<ol[^>]*>(\s*<li><span id="ref-)', r'<ol class="enumerate-bib">\1', inner, count=1)
 

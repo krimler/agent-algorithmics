@@ -35,7 +35,7 @@
 <h4 id="react-reasoning-and-acting">ReAct: Reasoning and Acting</h4>
 <p>The ReAct pattern [<a href="#ref-react2022">10</a>] interleaves reasoning traces with actions, so that the agent adapts as observations arrive. Figure <a href="#fig:react">16.1</a> shows the loop.</p>
 <figure id="fig:react">
-<img src="figures/16-case-studies-and-design-patterns-fig1-64db0d74a0.png" />
+<img src="figures/16-case-studies-and-design-patterns-fig1-64db0d74a0.png" alt="Figure 16.1. ReAct as a controlled loop. The thought is a planning scratchpad; the action is drawn from a finite typed tool set and passes a policy gate; the observation is normalized before it enters the state. The loop terminates on goal, on diminishing returns, or on budget." loading="lazy">
 <figcaption><strong>Figure 16.1.</strong> ReAct as a controlled loop. The thought is a planning scratchpad; the action is drawn from a finite typed tool set and passes a policy gate; the observation is normalized before it enters the state. The loop terminates on goal, on diminishing returns, or on budget.</figcaption>
 </figure>
 <p>ReAct’s strength is integration. Reasoning traces help the model stay coherent, while actions let it consult external resources on the basis of those thoughts. On knowledge-intensive tasks such as HotpotQA, ReAct agents avoid hallucination by using reasoning steps to decide when to search for evidence [<a href="#ref-react2022">10</a>]. In production, ReAct amounts to enforcing a <em>state machine</em>: the state is the evolving task context (goal, constraints, partial results, remaining budget); the action is constrained to a finite tool set with typed inputs and outputs; and the observation is normalized into a compact, stable schema so the model can condition on it reliably. The thought is often an internal planning scratchpad stored for debugging rather than shown to users.</p>
@@ -63,7 +63,7 @@ for step in plan:
 <h3 id="orchestration-patterns">16.1.2 Orchestration Patterns</h3>
 <p>As systems grow beyond one agent, orchestration patterns organize collaboration [<a href="#ref-msagentpatterns2025">7</a>]. Dividing work is the visible half of orchestration; the half that determines whether the system survives production is enforcement: separation of concerns (different prompts, tools, and policies per role), isolation (a failure in one role does not corrupt global state), and aggregation (merging partial results without losing provenance). Figure <a href="#fig:orchestration">16.2</a> shows the four shapes.</p>
 <figure id="fig:orchestration">
-<img src="figures/16-case-studies-and-design-patterns-fig2-a412ded5d3.png" />
+<img src="figures/16-case-studies-and-design-patterns-fig2-a412ded5d3.png" alt="Figure 16.2. Four orchestration shapes. A pipeline passes a structured artifact between fixed stages. A coordinator decomposes and aggregates. A handoff network transfers control directly, and needs a bound on the number of transfers. A group chat needs a manager who chooses the speaker and decides when the discussion is over." loading="lazy">
 <figcaption><strong>Figure 16.2.</strong> Four orchestration shapes. A pipeline passes a structured artifact between fixed stages. A coordinator decomposes and aggregates. A handoff network transfers control directly, and needs a bound on the number of transfers. A group chat needs a manager who chooses the speaker and decides when the discussion is over.</figcaption>
 </figure>
 <h4 id="sequential-pipeline">Sequential Pipeline</h4>

@@ -32,7 +32,7 @@
 <h2 id="why-agent-frameworks-resist-formalization">4.1 Why Agent Frameworks Resist Formalization</h2>
 <p>An ordinary program has a semantics because every construct has defined behavior. Agent frameworks break this in four places, shown in Figure <a href="#fig:four-obstacles">4.1</a>.</p>
 <figure id="fig:four-obstacles">
-<img src="figures/04-formal-semantics-types-and-contracts-fig1-7435ba4d64.png" />
+<img src="figures/04-formal-semantics-types-and-contracts-fig1-7435ba4d64.png" alt="Figure 4.1. The four features that separate an agent framework from an ordinary program. A semantics that assumes any of them away describes a different system." loading="lazy">
 <figcaption><strong>Figure 4.1.</strong> The four features that separate an agent framework from an ordinary program. A semantics that assumes any of them away describes a different system.</figcaption>
 </figure>
 <p><em>Oracle calls.</em> A model invocation returns an unpredictable value from an enormous space. Its behavior is not a function of its inputs in any usable sense.</p>
@@ -54,7 +54,7 @@
 <p>The most consequential formal result for practitioners concerns prompt injection.</p>
 <p>Chapter <a href="12-capability-boundaries-and-secure-tool-use.html#ch:capability">12</a> argues that the defense against injection is structural: trusted and untrusted content are kept apart so that data cannot become instruction. That argument can now be made precisely. <em>Information-flow control</em> is the discipline of labelling data by its origin and restricting how labels may propagate, so that content from an untrusted source cannot reach a position where it is obeyed. Figure <a href="#fig:ifc">4.2</a> shows the idea. The LLMbda calculus is an untyped call-by-value lambda calculus that models agents, conversations, and information flow on this basis, giving a formal account of provenance-based defenses including the dual-LLM pattern [<a href="#ref-llmbda2026">3</a>].</p>
 <figure id="fig:ifc">
-<img src="figures/04-formal-semantics-types-and-contracts-fig2-e095eb995a.png" />
+<img src="figures/04-formal-semantics-types-and-contracts-fig2-e095eb995a.png" alt="Figure 4.2. Information-flow control. Every value carries a label recording where it came from. A privileged tool call is allowed only when the arguments that matter were derived from trusted input; a value that flowed from a retrieved page cannot become the recipient of an email or the amount of a payment." loading="lazy">
 <figcaption><strong>Figure 4.2.</strong> Information-flow control. Every value carries a label recording where it came from. A privileged tool call is allowed only when the arguments that matter were derived from trusted input; a value that flowed from a retrieved page cannot become the recipient of an email or the amount of a payment.</figcaption>
 </figure>
 <p>The value of the calculus lies in what it exposes about existing defenses. Flow tracking is easy to implement incorrectly, deliberate relaxations are hard to audit, and the dual-LLM pattern is usually hard-wired into an architecture rather than derived. A calculus makes each of these a statement one can check. A relaxation becomes an explicit rule in the system rather than a comment in a code review.</p>

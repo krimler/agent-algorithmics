@@ -1,0 +1,14 @@
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+.buildtmp/
+# local backups
+*.orig-backup
+*.pre-style-backup
+*.pre-rewrite-*
+prev/
+prev_new/
+.DS_Store
+.venv/

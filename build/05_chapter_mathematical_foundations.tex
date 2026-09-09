@@ -1,0 +1,602 @@
+\chapter{Mathematical Foundations}
+\label{ch:math}
+
+This chapter builds the machinery the rest of the book leans on. Every section opens with a puzzle you can solve in your head, develops the intuition on a small example, and only then writes the formalism down. If a section's puzzle is already obvious to you, skip to the next one. Nothing here is load-bearing twice.
+
+Five topics, and each earns its place by showing up later, including sequential decision making (Chapters~\ref{ch:action-selection} and~\ref{ch:speculation}), constrained optimization (Chapters~\ref{ch:cost} through~\ref{ch:action-selection}), probability and expectation (Chapter~\ref{ch:gates}), complexity (Chapters~\ref{ch:memory} and~\ref{ch:retrieval}), and a handful of data structures that decide whether a design is practical.
+
+The next chapter, on where these ideas came from, is the one place you can read out of order without penalty. It is context rather than machinery, and nothing later depends on it.
+
+\section{Sequential Decision Making}
+
+\subsection{The Puzzle}
+
+You are playing a game. You stand in a room with two doors. Behind one door is \$100. Behind the other is nothing. You choose a door, collect whatever is behind it, and enter a new room. This new room also has two doors. The game continues for ten rooms.
+
+Here is the twist. The doors are labeled, and the labels give you hints. A door labeled "A" leads to \$100 with probability 0.8. A door labeled "B" leads to \$100 with probability 0.6, but the next room always has better odds.
+
+What is your strategy?
+
+If you think room by room, you might always pick "A" since 0.8 beats 0.6. But this ignores what happens later. The "B" door leads to better future rooms. Sometimes the worse immediate choice leads to better outcomes overall.
+
+This is sequential decision making. Actions have consequences that unfold over time. The best action now depends on what happens later. Agents face this constantly. A web search takes time now but provides information for later; a cheap model saves money now but may require expensive correction later.
+
+\subsection{States, Actions, and Transitions}
+
+Let us formalize the game. At any moment, you are in some situation. Call this a \textit{state}. In the door game, a state might be "room 3, previous doors were A, B." Let $s$ denote a state, and let $S$ denote the set of all possible states.
+
+From each state, you can take \textit{actions}. In the door game, your actions are "choose door A" or "choose door B." Let $a$ denote an action, and let $A(s)$ denote the actions available in state $s$.
+
+When you take an action, something happens. You move to a new state. This might be random. Door A leads to money with probability 0.8, to nothing with probability 0.2. We describe this with a \textit{transition function.} $P(s' | s, a)$ is the probability of landing in state $s'$ if you take action $a$ from state $s$.
+
+Finally, actions produce \textit{rewards}. Finding \$100 behind the door is a reward. Let $R(s, a, s')$ be the reward for taking action $a$ in state $s$ and landing in state $s'$. Sometimes we write $R(s, a)$ for the expected reward, averaging over possible next states.
+
+A \textit{policy} is a strategy. A rule for choosing actions. Formally, a policy $\pi$ maps states to actions. $\pi(s) = a$ means "in state $s$, take action $a$." A policy can also be probabilistic. $\pi(a|s)$ is the probability of taking action $a$ in state $s$.
+
+\subsection{The Bellman Equation}
+
+How good is a state? Define $V^\pi(s)$ as the expected total reward starting from state $s$ and following policy $\pi$. This is the \textit{value} of state $s$ under policy $\pi$.
+
+Here is the whole idea in one sentence. The value of a state is the immediate reward plus the value of wherever you land next. If you are in state $s$, take action $a$, receive reward $r$, and land in state $s'$, then your total reward is $r$ plus whatever you accumulate from $s'$ onward. That future accumulation is exactly $V^\pi(s')$.
+
+This gives us an equation
+\[
+V^\pi(s) = \sum_{a} \pi(a|s) \sum_{s'} P(s'|s,a) \left[ R(s,a,s') + \gamma V^\pi(s') \right]
+\]
+
+Read this carefully. For each action $a$ (weighted by how often the policy takes it), and for each next state $s'$ (weighted by how likely that transition is), add the immediate reward $R(s,a,s')$ plus the discounted future value $\gamma V^\pi(s')$.
+
+What is $\gamma$? It is a \textit{discount factor} between 0 and 1. A reward tomorrow is worth less than a reward today. If $\gamma = 0.9$, then \$100 tomorrow is worth \$90 today. This prevents infinite sums from blowing up, and it captures a real preference, namely sooner is better.
+
+This is the \textit{Bellman equation}, from Richard Bellman in the 1950s. Yes, it is circular. The value is defined using the value. That circularity is the useful part. Fix a policy and you can solve for the values; fix the values and you can improve the policy. Alternate, and you converge on the best policy available. Nearly every method in Chapter~\ref{ch:action-selection} is a cheap approximation to that loop, because agents rarely get to iterate to convergence.
+
+\subsection{Example: The Two Door Game}
+
+Let us solve the door game. Simplify to two rooms. In room 1, door A gives \$100 with probability 0.8 and leads to room 2. Door B gives \$100 with probability 0.6 and leads to room 2. In room 2, both doors give \$100 with probability 0.5. Set $\gamma = 1$ (no discounting).
+
+States: $s_1$ (room 1) and $s_2$ (room 2).
+
+If we always choose A, what is $V(s_1)$?
+
+From $s_1$: expected reward is $0.8 \times 100 = 80$. We land in $s_2$.
+
+From $s_2$: expected reward is $0.5 \times 100 = 50$. Game ends.
+
+Total from $s_1$: $V(s_1) = 80 + 50 = 130$.
+
+If we always choose B, what is $V(s_1)$?
+
+From $s_1$: expected reward is $0.6 \times 100 = 60$. We land in $s_2$.
+
+From $s_2$: expected reward is $0.5 \times 100 = 50$.
+
+Total from $s_1$: $V(s_1) = 60 + 50 = 110$.
+
+Choosing A is better. But now suppose door B in room 1 leads to a special room 2 where both doors give \$100 with probability 0.9. Now, such as Choosing B: $V(s_1) = 60 + 90 = 150$.
+
+Choosing A: $V(s_1) = 80 + 50 = 130$.
+
+Now B is better, despite the worse immediate odds. The future matters.
+
+\subsection{How Agents Use This}
+
+An agent choosing between actions faces exactly this problem. Calling a large model costs more tokens but may finish the task in one step. Calling a small model saves tokens but may require multiple attempts. The choice depends on downstream consequences.
+
+The states of an agent include its current context, the task at hand, remaining budget, and information gathered so far. Actions include model calls, tool invocations, and retrieval operations. Rewards might be task completion, and costs (negative rewards) are token expenditures.
+
+In practice, we rarely solve Bellman equations exactly. The state space is too large. But the framework tells us what we are optimizing and why myopic decisions fail. Later chapters develop practical approximations.
+
+\section{Constrained Optimization}
+
+\subsection{The Puzzle}
+
+You are packing for a hiking trip. Your backpack holds 20 kg. You have ten items to consider, including tent (3 kg, utility 10), sleeping bag (2 kg, utility 8), stove (1 kg, utility 5), and so on. Each item has weight and utility. You want maximum utility without exceeding 20 kg.
+
+This is easy to state, hard to solve. You cannot take everything. You must choose. And the choice is coupled. Taking the tent leaves less room for other items.
+
+Agents face this constantly. You have a token budget. Each action consumes tokens. Each action provides value. You want maximum value without exceeding the budget. The mathematics is the same.
+
+\subsection{The General Form}
+
+An optimization problem has three parts, namely decision variables (what you choose), an objective function (what you maximize or minimize), and constraints (limits on what you can choose).
+
+Formally
+\begin{align*}
+\text{maximize} \quad & f(x) \\
+\text{subject to} \quad & g_i(x) \leq 0, \quad i = 1, \ldots, m
+\end{align*}
+
+Here $x$ is your decision (a vector of choices), $f(x)$ is your objective (utility, reward, quality), and each $g_i(x) \leq 0$ is a constraint (budget limits, time limits, capacity limits).
+
+The backpack problem, such as let $x_i = 1$ if you take item $i$, and $x_i = 0$ otherwise. Let $u_i$ be the utility of item $i$ and $w_i$ its weight. Then
+\begin{align*}
+\text{maximize} \quad & \sum_i u_i x_i \\
+\text{subject to} \quad & \sum_i w_i x_i \leq 20
+\end{align*}
+
+This is the \textit{knapsack problem}. It is NP-hard in general, but good approximations exist.
+
+\subsection{Lagrangian Relaxation}
+
+Constraints complicate optimization. Without the weight limit, you would take everything. The limit forces tradeoffs. Is there a systematic way to handle constraints?
+
+Lagrangian relaxation converts a constrained problem into an unconstrained one by putting a price on constraint violations.
+
+Suppose exceeding the weight limit costs you \$5 per kg. Now you face a tradeoff: is the tent worth 3 kg $\times$ \$5 = \$15 in penalties? If its utility exceeds 15, take it. Otherwise, leave it.
+
+Formally, introduce a \textit{Lagrange multiplier} $\lambda \geq 0$ for each constraint. Form the \textit{Lagrangian.}
+\[
+L(x, \lambda) = f(x) - \lambda \cdot g(x)
+\]
+
+If you violate the constraint ($g(x) > 0$), you pay a penalty proportional to the violation. If you satisfy it ($g(x) \leq 0$), the penalty term is zero or negative (a bonus).
+
+The multiplier $\lambda$ is the \textit{shadow price} of the constraint. It tells you how much the objective would improve if the constraint were relaxed by one unit. If $\lambda = 5$ for the weight constraint, then one extra kg of capacity would let you gain 5 units of utility.
+
+\subsection{Example: Token Budget}
+
+An agent has a budget of 1000 tokens. Three possible actions.
+\begin{itemize}
+\item Action A: costs 600 tokens, expected value 10
+\item Action B: costs 400 tokens, expected value 7
+\item Action C: costs 300 tokens, expected value 5
+\end{itemize}
+
+Let $x_A, x_B, x_C \in \{0, 1\}$ indicate which actions to take.
+
+\begin{align*}
+\text{maximize} \quad & 10 x_A + 7 x_B + 5 x_C \\
+\text{subject to} \quad & 600 x_A + 400 x_B + 300 x_C \leq 1000
+\end{align*}
+
+Check the combinations.
+\begin{itemize}
+\item A alone: value 10, cost 600. Feasible.
+\item B alone: value 7, cost 400. Feasible.
+\item C alone: value 5, cost 300. Feasible.
+\item A and B: cost 1000. Value 17. Feasible.
+\item A and C: cost 900. Value 15. Feasible.
+\item B and C: cost 700. Value 12. Feasible.
+\item All three: cost 1300. Infeasible.
+\end{itemize}
+
+Best feasible solution: A and B, value 17.
+
+What is the shadow price? If budget increased to 1001, could we do better? No, because the next cheapest item (C at 300) still does not fit with A and B. But if budget increased to 1300, we could add C for value 22. The shadow price depends on how much \emph{slack} exists. The gap between the budget and what you are actually committed to spending. Chapter~\ref{ch:action-selection} turns that quantity into the central control signal.
+
+\subsection{Value Density}
+
+For knapsack problems, a useful heuristic is \textit{value density}, value per unit cost.
+\begin{itemize}
+\item Action A: $10/600 \approx 0.017$ per token
+\item Action B: $7/400 \approx 0.018$ per token
+\item Action C: $5/300 \approx 0.017$ per token
+\end{itemize}
+
+B has the highest density. A greedy algorithm would pick B first (cost 400), then C (cost 300, total 700), then A does not fit (would need 600 more, only 300 left). Greedy gives B and C for value 12.
+
+The optimal answer is A and B, worth 17. Greedy lost because density ignores how the items \emph{pack.} B and C fit together comfortably and leave a hole too small for A. Density still gives a useful ranking, and greedy still lands within a bounded factor of optimal.
+
+That is the trade agents make. Rank candidate actions by expected value per token, take them in order until the budget runs out, and accept a small loss against an optimum you could not have computed in time anyway. Chapter~\ref{ch:action-selection} builds on this ranking and then repairs its main weakness. That it spends the budget it should have reserved for finishing.
+
+\section{Probability and Expectation}
+
+\subsection{The Puzzle}
+
+You flip a coin. Heads, you win \$10. Tails, you win nothing. How much is this game worth to you?
+
+Most people say \$5. They compute the average: half the time you get \$10, half the time you get \$0, so on average you get \$5.
+
+This is \textit{expected value}. It collapses a distribution of outcomes into a single number representing the average.
+
+But now consider, including Heads, you win \$1,000,000. Tails, you lose \$500,000. Expected value is $0.5 \times 1000000 + 0.5 \times (-500000) = \$250,000$. Would you play?
+
+Most people decline, and they are not being irrational. A quarter-million in expectation is worth very little if one bad flip removes your ability to keep playing. Expectation describes an average over many plays; you get one.
+
+Agents live in the same regime. A speculative action with high expected value can burn the entire budget on failure and leave nothing for the synthesis step that actually answers the question. A conservative action returns less and costs what you predicted. Chapter~\ref{ch:gates} turns this into thresholds you can derive, but the intuition to carry forward is that variance, not just mean, decides whether an agent finishes.
+
+\subsection{Random Variables and Expectation}
+
+A \textit{random variable} $X$ is a quantity whose value depends on a random outcome. The coin flip result is a random variable. It takes value 10 with probability 0.5 and value 0 with probability 0.5.
+
+The \textit{expected value} (or \textit{expectation} or \textit{mean}) is the probability-weighted average
+\[
+\mathbb{E}[X] = \sum_x x \cdot P(X = x)
+\]
+
+For the coin flip: $\mathbb{E}[X] = 10 \times 0.5 + 0 \times 0.5 = 5$.
+
+For continuous random variables, the sum becomes an integral, but the intuition is the same.
+
+Expected value is linear. If $X$ and $Y$ are random variables and $a, b$ are constants
+\[
+\mathbb{E}[aX + bY] = a\mathbb{E}[X] + b\mathbb{E}[Y]
+\]
+
+This holds even if $X$ and $Y$ are not independent. Linearity of expectation is immensely useful for analyzing complex systems by breaking them into parts.
+
+\subsection{Variance and Standard Deviation}
+
+Expectation tells you the center of a distribution. \textit{Variance} tells you the spread.
+
+\[
+\text{Var}(X) = \mathbb{E}[(X - \mathbb{E}[X])^2] = \mathbb{E}[X^2] - (\mathbb{E}[X])^2
+\]
+
+Variance measures how far values typically fall from the mean, squared. The \textit{standard deviation} is the square root of variance: $\sigma = \sqrt{\text{Var}(X)}$. It has the same units as $X$.
+
+For the coin flip with outcomes 10 and 0
+\begin{align*}
+\mathbb{E}[X] &= 5 \\
+\mathbb{E}[X^2] &= 10^2 \times 0.5 + 0^2 \times 0.5 = 50 \\
+\text{Var}(X) &= 50 - 25 = 25 \\
+\sigma &= 5
+\end{align*}
+
+The standard deviation equals the mean. This is high variance. Compare to a game where you always get \$5, namely variance is zero.
+
+\subsection{Example: Action Selection Under Uncertainty}
+
+An agent chooses between two search strategies, described below.
+\begin{itemize}
+\item Strategy A: Returns 3 relevant documents with probability 0.9, returns 0 documents with probability 0.1
+\item Strategy B: Always returns exactly 2 relevant documents
+\end{itemize}
+
+Expected documents from A: $3 \times 0.9 + 0 \times 0.1 = 2.7$.
+
+Expected documents from B: $2 \times 1.0 = 2$.
+
+Strategy A has higher expected value. But it also has variance, such as sometimes you get nothing.
+
+Variance of A: $\mathbb{E}[X^2] - (\mathbb{E}[X])^2 = (9 \times 0.9 + 0 \times 0.1) - 2.7^2 = 8.1 - 7.29 = 0.81$. Standard deviation $\approx 0.9$.
+
+Variance of B: Zero.
+
+If failure is catastrophic (the task fails without documents), Strategy B might be preferable despite lower expected value. If you can retry on failure, Strategy A is better. The right choice depends on the consequences of variance.
+
+\subsection{Conditional Probability and Bayes' Rule}
+
+Sometimes you learn information that changes probabilities. \textit{Conditional probability} captures this. $P(A|B)$ is the probability of $A$ given that $B$ occurred.
+\[
+P(A|B) = \frac{P(A \cap B)}{P(B)}
+\]
+
+\textit{Bayes' rule} lets you flip the conditioning
+\[
+P(A|B) = \frac{P(B|A) \cdot P(A)}{P(B)}
+\]
+
+This is central to updating beliefs. You start with a prior belief $P(A)$. You observe evidence $B$. You update to posterior belief $P(A|B)$.
+
+Example. An agent believes a fact is true with probability 0.7 (prior). The agent searches and finds a document. Documents supporting true facts appear 90\% of the time. Documents supporting false facts appear 30\% of the time.
+
+Let $T$ = "fact is true" and $D$ = "found supporting document."
+\begin{align*}
+P(T) &= 0.7 \\
+P(D|T) &= 0.9 \\
+P(D|\neg T) &= 0.3
+\end{align*}
+
+First compute $P(D)$
+\[
+P(D) = P(D|T)P(T) + P(D|\neg T)P(\neg T) = 0.9 \times 0.7 + 0.3 \times 0.3 = 0.63 + 0.09 = 0.72
+\]
+
+Then apply Bayes
+\[
+P(T|D) = \frac{P(D|T) \cdot P(T)}{P(D)} = \frac{0.9 \times 0.7}{0.72} = \frac{0.63}{0.72} \approx 0.875
+\]
+
+After finding the document, belief in the fact rises from 0.7 to 0.875. The evidence updated the belief.
+
+Agents constantly update beliefs, including about what facts are true, about what actions will succeed, about what the user wants. Bayes' rule is the principled way to incorporate evidence.
+
+\section{Complexity Analysis}
+
+\subsection{The Puzzle}
+
+You have a list of 1,000,000 names. You need to find "Zachary." How long does this take?
+
+If you check each name from the beginning, you might check all million names in the worst case. On average, you check half a million.
+
+But if the list is sorted alphabetically, you can do binary search. Check the middle name. Is "Zachary" before or after? Eliminate half the list. Repeat. After 20 checks ($\log_2 1000000 \approx 20$), you find Zachary or confirm he is absent.
+
+The difference between checking a million names and checking twenty is the difference between an algorithm that finishes in seconds and one that takes hours. Complexity analysis makes this precise.
+
+\subsection{Big-O Notation}
+
+Big-O notation describes how resource usage grows with input size.
+
+$O(n)$ means the resource grows linearly. Double the input, double the resource. Scanning an unsorted list is $O(n)$: if the list has $n$ names, you might check $n$ names.
+
+$O(\log n)$ means the resource grows logarithmically. Double the input, add a constant. Binary search is $O(\log n)$: if the list has $n$ names, you check about $\log_2 n$ names.
+
+$O(n^2)$ means the resource grows quadratically. Double the input, quadruple the resource. Comparing every pair of items is $O(n^2)$.
+
+$O(1)$ means the resource is constant regardless of input size. Looking up an item in a hash table (usually) is $O(1)$.
+
+Formally, $f(n) = O(g(n))$ means there exist constants $c$ and $n_0$ such that $f(n) \leq c \cdot g(n)$ for all $n \geq n_0$. Big-O captures the growth rate, ignoring constant factors.
+
+\subsection{Time and Space}
+
+Algorithms consume two resources, namely time (how many operations) and space (how much memory).
+
+A hash table provides $O(1)$ average time lookup but requires $O(n)$ space to store $n$ items.
+
+A sorted list requires only $O(n)$ space (same as the items) but lookup takes $O(\log n)$ time.
+
+This is a tradeoff. Use more space to get faster time. Use less space and accept slower time.
+
+Agents face this tradeoff. Caching previous results uses memory but speeds up repeated queries. Storing full conversation history uses space but enables retrieval.
+
+\subsection{Amortized Complexity}
+
+Some operations are expensive occasionally but cheap usually. \textit{Amortized analysis} averages over sequences of operations.
+
+Example. A dynamic array doubles in size when full. Most insertions take $O(1)$ (just append). Occasionally, insertion triggers doubling, such as allocate new array, copy all items, $O(n)$ work.
+
+But doubling happens rarely. After doubling, you can insert $n$ items before doubling again. The expensive $O(n)$ cost is spread over $n$ cheap insertions. Amortized cost per insertion is $O(1)$.
+
+This matters for agents. A memory compaction that takes 100ms happens every 1000 operations. Amortized cost is 0.1ms per operation. Expensive operations are acceptable if they happen rarely enough.
+
+\subsection{Example: Retrieval Complexity}
+
+An agent retrieves from a corpus of $n$ documents.
+
+Brute force search, including Compare query to every document. Time $O(n)$. Space $O(n)$ for documents.
+
+Inverted index. For each term, store list of documents containing it. Lookup term, get candidate documents. Time $O(k)$ where $k$ is the number of matching documents. Space $O(n \cdot L)$ where $L$ is average document length.
+
+Vector search with HNSW (Hierarchical Navigable Small World, an approximate nearest-neighbour index), namely Build a graph over embeddings. Search navigates the graph. Time $O(\log n)$ average. Space $O(n \cdot d)$ where $d$ is embedding dimension.
+
+For 1 million documents the numbers work out as follows.
+\begin{itemize}
+\item Brute force, such as 1,000,000 comparisons
+\item HNSW: about 20 comparisons
+\end{itemize}
+
+The difference is dramatic. Complexity analysis tells you which approaches scale.
+
+\section{Data Structures}
+
+\subsection{The Puzzle}
+
+You run a library. Patrons return books and check out books. You need to track which books are available. How do you organize the data?
+
+Option 1, including A list of available books. To check if a book is available, scan the list. To check out, remove from list. To return, add to list.
+
+Option 2. A set of available books (implemented as a hash table). To check if a book is available, hash lookup. To check out, remove by key. To return, add by key.
+
+The list takes $O(n)$ time to check availability. The set takes $O(1)$. For a library with 100,000 books and 1,000 checkouts per day, this difference is enormous.
+
+Data structures determine what operations are fast and what operations are slow. Choosing the right data structure is often the difference between a system that works and one that does not.
+
+\subsection{Hash Tables}
+
+A hash table stores key-value pairs with $O(1)$ average lookup, insertion, and deletion.
+
+The idea, namely Compute a hash function of the key. Use the hash as an index into an array. Store the value at that index.
+
+Collisions occur when two keys hash to the same index. Handle with chaining (linked list at each index) or probing (find next empty slot).
+
+Average case, such as $O(1)$ for all operations.
+
+Worst case, including $O(n)$ if all keys collide. Good hash functions make this unlikely.
+
+Space: $O(n)$ for $n$ items.
+
+Agents use hash tables constantly. Mapping message IDs to content. Caching query results. Tracking seen documents. Any time you need fast lookup by key.
+
+\subsection{Trees}
+
+Trees organize data hierarchically with $O(\log n)$ operations for balanced trees.
+
+Binary search trees. Each node has a key. Left children have smaller keys, right children have larger keys. Search, insert, and delete take $O(\log n)$ time if the tree stays balanced.
+
+B-trees. Generalize binary trees with multiple keys per node. Optimized for disk access. Used in databases.
+
+Tries, namely Trees for strings. Each edge represents a character. Finding a string of length $m$ takes $O(m)$ time regardless of how many strings are stored. Useful for prefix matching and autocomplete.
+
+Agents use trees for, such as Hierarchical state organization. Range queries (find all items between X and Y). Prefix searches (find all entities starting with "New").
+
+\subsection{Bloom Filters}
+
+A bloom filter answers "is $x$ in the set?" with.
+\begin{itemize}
+\item "Definitely not" (always correct)
+\item "Probably yes" (sometimes wrong)
+\end{itemize}
+
+The structure, including A bit array of $m$ bits, all initially 0. $k$ hash functions. To insert $x$: compute $k$ hashes, set those bits to 1. To query $x$: compute $k$ hashes, check if all bits are 1.
+
+If any bit is 0, $x$ is definitely not in the set. If all bits are 1, $x$ is probably in the set (but might be a false positive from collisions).
+
+Space. Much smaller than storing actual items. With $m = 10n$ bits and $k = 7$ hash functions, false positive rate is about 1\%.
+
+Agents use bloom filters for "Have I seen this document?" checks. Avoiding duplicate retrievals. Fast negative filtering before expensive operations.
+
+\subsection{Graphs}
+
+Graphs represent relationships. Nodes are entities, edges are connections.
+
+The representation options are these.
+\begin{itemize}
+\item Adjacency matrix: $n \times n$ matrix. Entry $(i,j)$ indicates edge from $i$ to $j$. Space $O(n^2)$. Edge lookup $O(1)$.
+\item Adjacency list. Each node stores list of neighbors. Space $O(n + e)$ where $e$ is number of edges. Edge lookup $O(\text{degree})$.
+\end{itemize}
+
+The relevant graph algorithms are these.
+\begin{itemize}
+\item BFS/DFS: Visit all reachable nodes. Time $O(n + e)$.
+\item Shortest path, namely Find minimum-cost path. Dijkstra's algorithm: $O((n + e) \log n)$.
+\item Topological sort, such as Order nodes respecting dependencies. Time $O(n + e)$.
+\end{itemize}
+
+Agents use graphs for, including Representing action dependencies. Planning execution order. Modeling relationships between entities.
+
+\section{Putting It Together}
+
+These mathematical tools recur throughout the book.
+
+When we analyze action selection under budget constraints, we use constrained optimization. The budget is a constraint. The objective is task value. Lagrangian relaxation gives us shadow prices for tokens.
+
+When we model agent behavior over time, we use MDPs. States capture context and progress. Actions are model calls and tool uses. Rewards are task completions minus costs. Bellman equations guide policy improvement.
+
+When we analyze retrieval and memory systems, we use complexity analysis. Which index structure scales? What are the time/space tradeoffs? How does latency grow with corpus size?
+
+When we reason about uncertainty, we use probability. What is the expected cost of this action? What is the variance? How should beliefs update given evidence?
+
+When we implement these ideas, we choose data structures. Hash tables for fast lookup. Trees for ordered access. Bloom filters for membership tests. The right structure makes the difference between practical and impractical.
+
+Later chapters recall whatever they need at the point of use, so nothing here has to be memorized. What is worth carrying forward is the habit. When an agent behaves strangely, ask which of these five it is. Runaway spending is usually a missing constraint. Oscillation is usually a missing discount. Confident nonsense is usually a missing variance term.
+
+\section{Fallacies and Pitfalls}
+
+\textbf{Fallacy. Expected value is the whole story.} It is the right summary when
+you get many independent draws. An agent with one budget and one shot at the task
+is not in that regime, and optimizing expectation alone will happily accept a
+policy that succeeds brilliantly 70\% of the time and produces an unrecoverable
+mess the other 30\%.
+
+\textbf{Fallacy. A discount factor is a modeling detail.} $\gamma$ encodes how
+much the system values finishing later versus now. Set it near 1 and a
+long-horizon agent will explore indefinitely because the payoff always looks
+reachable. Set it too low and the agent refuses to invest in a retrieval step that
+would have answered the question.
+
+\textbf{Fallacy. Big-O settles the design.} Constants decide agent architectures.
+An $O(\log n)$ index behind a 40\,ms network hop loses to an $O(n)$ scan over a
+list already sitting in memory, for every $n$ you will actually see.
+
+\textbf{Fallacy. The Lagrange multiplier can be computed once.} $\lambda$ is the
+shadow price of the budget, and the budget changes at every step. A multiplier
+fitted offline is correct for one point on a trajectory that does not stay there.
+
+\textbf{Pitfall. Treating a false positive and a false negative as one error rate.}
+Chapter~\ref{ch:gates} derives thresholds from asymmetric costs. Averaging the two
+into ``accuracy'' throws away exactly the information the threshold needs.
+
+\section{Summary}
+
+Five tools, and the reason each is here.
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Tool & Answers & Used in \\
+\midrule
+MDPs / Bellman & What should I do next, given the future? & Ch.~\ref{ch:action-selection}, \ref{ch:speculation} \\
+Constrained optimization & How do I maximize value under a cap? & Ch.~\ref{ch:cost}--\ref{ch:action-selection} \\
+Probability / expectation & How confident am I, and how risky is this? & Ch.~\ref{ch:gates} \\
+Complexity analysis & Will this still work at $100\times$ the data? & Ch.~\ref{ch:memory}, \ref{ch:retrieval} \\
+Data structures & Is this implementable at all? & Ch.~\ref{ch:memory}, \ref{ch:retrieval} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The recurring theme is coupling. A budget makes today's decision depend on
+tomorrow's feasibility, which is why greedy selection fails and why the
+reservation term $R_t$ exists. Everything else in this chapter is machinery for
+reasoning about that coupling.
+
+\section*{Exercises}
+
+\begin{enumerate}
+\item In the two-door game, find the value of $\gamma$ at which door B becomes
+preferable to door A on the first move. Explain what that threshold means for an
+agent deciding whether to run a slow, high-quality retrieval.
+
+\item An agent has a 10{,}000-token budget and four candidate actions with
+(expected value, cost) of $(9, 3000)$, $(7, 4000)$, $(5, 2500)$, $(4, 1500)$.
+Compute the greedy-by-density solution and the optimal solution. What is the gap,
+and what property of the costs produced it?
+
+\item Show that if verification costs $c_v$ and catches a fraction $q$ of errors
+each costing $c_e$, verification is worth running exactly when $c_v < q \cdot c_e$.
+Then explain why a noisy verifier that sometimes damages correct outputs breaks
+this inequality, and what term you would add.
+
+\item A retrieval index answers in $O(\log n)$ with a 40\,ms constant; a linear scan
+answers in $O(n)$ at 5\,ns per item. Find the $n$ at which the index wins. Comment
+on whether your corpus is anywhere near it.
+
+\item An agent's per-step cost is believed to be Gaussian with mean 800 tokens and
+standard deviation 300. It has 5{,}000 tokens left and must reserve enough to
+finish in 4 more steps with 95\% probability. How much can it spend now? Redo the
+calculation with standard deviation 900 and comment on the difference.
+\end{enumerate}
+
+\section*{Bibliographic Notes}
+
+Markov decision processes are covered in Puterman \cite{puterman1994markov}. Sutton and Barto \cite{sutton2018reinforcement} provide an accessible introduction oriented toward reinforcement learning.
+
+Constrained optimization is treated in Boyd and Vandenberghe \cite{boyd2004convex}. The treatment of Lagrange multipliers follows Bertsekas \cite{bertsekas1999nonlinear}.
+
+Probability foundations appear in any undergraduate text; Ross \cite{ross2014first} is widely used. Bayesian reasoning is developed in Gelman et al. \cite{gelman2013bayesian}.
+
+Complexity analysis is covered in Cormen et al. \cite{cormen2009introduction}, the standard algorithms textbook. Amortized analysis originates with Tarjan \cite{tarjan1985amortized}.
+
+Data structures are treated comprehensively in Cormen et al. \cite{cormen2009introduction}. Bloom filters were introduced by Bloom \cite{bloom1970space}. HNSW for approximate nearest neighbor search is described in Malkov and Yashunin \cite{malkov2018efficient}.
+
+\begin{thebibliography}{20}
+
+\bibitem{puterman1994markov}
+M.~L. Puterman.
+\newblock \emph{Markov Decision Processes. Discrete Stochastic Dynamic Programming}.
+\newblock Wiley, 1994.
+
+\bibitem{sutton2018reinforcement}
+R.~S. Sutton and A.~G. Barto.
+\newblock \emph{Reinforcement Learning. An Introduction}.
+\newblock MIT Press, 2nd edition, 2018.
+
+\bibitem{boyd2004convex}
+S.~Boyd and L.~Vandenberghe.
+\newblock \emph{Convex Optimization}.
+\newblock Cambridge University Press, 2004.
+
+\bibitem{bertsekas1999nonlinear}
+D.~P. Bertsekas.
+\newblock \emph{Nonlinear Programming}.
+\newblock Athena Scientific, 2nd edition, 1999.
+
+\bibitem{ross2014first}
+S.~Ross.
+\newblock \emph{A First Course in Probability}.
+\newblock Pearson, 9th edition, 2014.
+
+\bibitem{gelman2013bayesian}
+A.~Gelman, J.~B. Carlin, H.~S. Stern, D.~B. Dunson, A.~Vehtari, and D.~B. Rubin.
+\newblock \emph{Bayesian Data Analysis}.
+\newblock CRC Press, 3rd edition, 2013.
+
+\bibitem{cormen2009introduction}
+T.~H. Cormen, C.~E. Leiserson, R.~L. Rivest, and C.~Stein.
+\newblock \emph{Introduction to Algorithms}.
+\newblock MIT Press, 3rd edition, 2009.
+
+\bibitem{tarjan1985amortized}
+R.~E. Tarjan.
+\newblock Amortized computational complexity.
+\newblock \emph{SIAM Journal on Algebraic and Discrete Methods}, 6(2):306--318, 1985.
+
+\bibitem{bloom1970space}
+B.~H. Bloom.
+\newblock Space/time trade-offs in hash coding with allowable errors.
+\newblock \emph{Communications of the ACM}, 13(7):422--426, 1970.
+
+\bibitem{malkov2018efficient}
+Y.~A. Malkov and D.~A. Yashunin.
+\newblock Efficient and robust approximate nearest neighbor search using hierarchical navigable small world graphs.
+\newblock \emph{IEEE Transactions on Pattern Analysis and Machine Intelligence}, 42(4):824--836, 2018.
+
+\end{thebibliography}
+%=====================================
+% Chapter 1: Agents as Algorithmic Systems
+% ============================================================
+
+% ------------------------------------------------------------
+% Chapter: Cost Models and Critical Paths
+% ========================================
+

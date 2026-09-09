@@ -1,0 +1,900 @@
+\chapter{Evaluation: Stability, Cost, and Behavioral Fidelity}
+\label{ch:evaluation}
+
+Run the same agent on the same task ten times. Count how many times it succeeds,
+how many distinct action sequences it takes, and how much the most expensive run
+cost relative to the cheapest.
+
+For most agents, those three numbers are more informative than any benchmark
+score, and most teams have never collected them. The mean success rate that gets
+reported hides a distribution, and it is the distribution that determines whether
+you can operate the thing. A system that is excellent seven times and
+catastrophic three times has the same mean as one that is merely good every time,
+and only one of them can be put in front of customers.
+
+Evaluation is the control system that decides whether a capability ships, scales,
+and keeps running. It has to answer operational questions, including does this work on
+representative tasks, does it work \emph{consistently}, does it cost what we
+budgeted under a real traffic mix, and does it behave as intended under policy and
+adversarial pressure.
+
+Agent evaluation differs fundamentally from model evaluation. A language model can be evaluated on a static benchmark with fixed inputs and outputs and a single inference step. An agent is a dynamic system. It decides, takes actions, observes outcomes, and often adapts behavior within a single task. The same input can produce different action sequences across runs, and those sequences can have real side effects (tool calls, database writes, external API operations). Evaluation must handle trajectory variance, partial observability, and compounding error, while still producing conclusions that are actionable for an engineer making rollout and SLO decisions.
+
+This chapter develops evaluation as engineering, namely stability metrics that quantify
+trajectory-level variance, cost models that predict consumption under a traffic
+mix, and fidelity measures that check whether the agent did the right thing rather
+than merely arriving at the right answer. The output is a deployment decision with the evidence attached. Ship, defer, or ship behind guardrails.
+
+One caution frames everything that follows, and it is newer than most evaluation
+practice. A benchmark score is a property of a model, a harness, and an environment
+together, and the harness contributes more
+than the field assumed. Section~\ref{sec:harness} treats this directly, because
+it determines whether any number in your evaluation report means what you think it
+means.
+
+\section{The Evaluation Problem}
+
+Evaluation determines whether a system meets its requirements. For agents, requirements span multiple dimensions that interact in complex ways. A mature evaluation plan is explicit about those dimensions, explicit about how metrics are computed from traces or trajectories, and explicit about how uncertainty is reported.
+
+\subsection{Evaluation Dimensions}
+
+\textbf{Correctness} asks whether the agent produces right answers or correct task outcomes. In question answering, correctness means factual accuracy, correct citations, and relevance to the question. In task completion, correctness means the intended end state was achieved (ticket closed correctly, configuration applied correctly, purchase completed correctly) and verified by a ground truth signal (tests passed, database state updated as expected, human confirmation). Correctness is necessary but insufficient. An agent that is correct 90% of the time but violates policy 0.5% of the time, or costs 10\times the budget, is not deployable.
+
+\textbf{Stability} asks whether behavior is consistent. Stability is about variance, such as repeated runs on the same task should not oscillate between excellence and failure, and should not produce widely varying tool usage, latency, or costs. For production systems, stability matters because it determines predictability. A median that looks good but a tail that is chaotic is a paging machine.
+
+\textbf{Efficiency} asks what resources the agent consumes. The relevant resources are, including tokens (and therefore dollars for API-hosted models), tool calls (and their monetary costs or rate-limit costs), wall-clock time (latency and user experience), and internal compute (CPU/GPU time for self-hosted models). Efficiency here means a predictable cost envelope for a known traffic mix, which is a stronger and more useful property than being cheap.
+
+\textbf{Fidelity} asks whether the agent behaves as intended. Fidelity is the most frequently under-measured dimension in early agent prototypes. A system can succeed on correctness metrics while doing the wrong thing internally, namely using forbidden tools, accessing unauthorized data, or bypassing required procedures. Fidelity catches the ``got the right answer by violating process’’ class of failures, which is fatal in regulated or audited environments.
+
+\textbf{Robustness} asks how the agent handles adversity, such as edge cases, adversarial inputs, and distribution shift. Robustness is a stress test for the system boundaries. Production traffic is messier than benchmarks, including inputs are incomplete, ambiguous, malicious, or simply weird.
+
+These dimensions interact. High accuracy with high variance can be worse than moderate accuracy with low variance, because it makes the system difficult to operate. Low cost with policy violations is unacceptable regardless of efficiency. A robust agent that is slightly slower may be preferable to a fast agent that collapses under perturbations.
+
+\subsection{Agent vs. Model Evaluation}
+
+Model evaluation often assumes, namely (i) a fixed input-output mapping, (ii) a single inference step, (iii) no external side effects, and (iv) deterministic or near-deterministic behavior under fixed decoding settings. Even when a model is sampled, the evaluation unit is still a single output.
+
+Agent evaluation must handle multi-step trajectories where the same task may be accomplished via different action sequences. Tool calls can have real effects that change environment state (create a ticket, edit a file, place an order), so repeated runs cannot always be performed in the same environment state unless the evaluation harness can reset or sandbox the environment. Agents are also inherently non-deterministic in practice, such as sampling causes trajectory variance even on identical inputs, and external tools introduce additional stochasticity (network latency, eventual consistency, concurrent updates). Evaluation must therefore separate failures in the agent policy from failures in the environment and tooling.
+
+These differences create fundamental evaluation challenges. \textit{Trajectory variance} means success metrics must account for multiple valid solutions. Two agents might correctly answer a question, one via web search and one via database lookup, and both may be acceptable. Evaluation must avoid over-penalizing legitimate diversity while still detecting instability.
+
+\textit{Partial observability} means the evaluator may not observe all relevant state; internal reasoning and external environment state may be hidden. This pushes evaluation toward trace capture, instrumentation, and proxy signals.
+
+\textit{Counterfactual difficulty} means that once an agent takes an action with real effects, we cannot easily evaluate alternative paths for the same run. This makes ``why did it choose this tool’’ harder than in a static model setting.
+
+\textit{Compounding errors} means early mistakes propagate and amplify through subsequent steps. A small retrieval mistake can cascade into wrong tool calls, wasted tokens, and ultimately failure. Trajectory-level evaluation is essential to identify where the cascade begins.
+
+\subsection{Formal Framework}
+
+Let $\mathcal{T}$ be a set of tasks, $\pi$ an agent policy, and $\mathcal{E}$ an environment. Running agent $\pi$ on task $t$ in environment $\mathcal{E}$ produces a trajectory $\tau$, the sequence of states, actions, and observations. From the trajectory we compute metrics $m(\tau)$. Crucially, $m(\tau)$ is not only about the final answer; it includes the internal path, including tool usage, policy decisions, retries, and resource consumption.
+
+Because agents are stochastic, a single run is insufficient. Running $k$ times on task $t$ produces trajectories $\tau_1, \ldots, \tau_k$ with metrics $m_1, \ldots, m_k$. The sample mean $\hat{m} = \frac{1}{k}\sum_i m_i$ estimates expected performance, but an engineer needs more than a mean, namely variance, tails, and confidence intervals determine operational risk.
+
+Aggregating across tasks requires care. If task difficulty varies, simple averaging may be misleading. Stratified analysis by task type, difficulty, and other factors reveals where agents succeed, where they fail, and where they become unstable. In practice, a production rollout decision is almost always stratified ``deploy for simple tasks, escalate complex tasks’’ is an evaluation-driven policy.
+
+\section{The CLASSIC Framework}
+
+Enterprise agent evaluation requires holistic assessment across multiple dimensions. The CLASSIC framework \cite{classic2025}, introduced at ICLR 2025, provides a structured approach that aligns well with production concerns.
+
+\begin{itemize}
+\item \textbf{Cost.} Operational expenses including API usage, token consumption, and infrastructure overhead.
+\item \textbf{Latency.} End-to-end response times from request to completion, including queues, tool calls, and retries.
+\item \textbf{Accuracy.} Correctness in selecting and executing workflows, not just producing plausible text.
+\item \textbf{Stability.} Consistency and robustness across diverse inputs and conditions, including repeated runs.
+\item \textbf{Security.} Resilience against adversarial inputs, prompt injections, and data leaks.
+\end{itemize}
+
+This multi-dimensional view exposes tradeoffs that are invisible in single-metric evaluation. For example, an agent might achieve high accuracy by calling expensive tools or large models on every request. Another agent might achieve low latency by skipping validation or using a cheaper model that fails on long-tail cases. CLASSIC forces the evaluator to quantify each dimension and make tradeoffs explicit.
+
+The CLASSIC evaluation on real enterprise data \cite{classic2025} revealed significant variation across dimensions. On 2,133 real-world user-chatbot conversations across IT, HR, banking, and healthcare, the best LLM achieved only 76.1% accuracy, far below benchmark performance. Security varied dramatically. One model refused only 78.5% of jailbreak prompts. The operational lesson is simple, such as benchmarks can be optimistic, and an evaluation suite must include real workflows, real tool chains, and real attack surfaces.
+
+\section{Stability Metrics}
+
+Stability quantifies behavioral consistency. An unstable agent produces highly variable outcomes even on identical inputs. In production, instability is experienced as ``sometimes it works, sometimes it goes off the rails,’’ which is difficult to diagnose, difficult to trust, and expensive to operate.
+
+\subsection{Trajectory Variance}
+
+For a task $t$ with $k$ runs producing trajectories $\tau_1, \ldots, \tau_k$, define a scalar metric $m(\tau)$ of interest (success, cost, latency, fidelity score). A basic stability measure is the variance of that metric across runs
+
+\[
+  \text{Var}(t) = \frac{1}{k-1} \sum_{i=1}^{k} (m(\tau_i) - \bar{m})^2
+\]
+
+where $\bar{m}$ is the mean metric across runs.
+
+Variance is interpretable. High variance indicates unreliable behavior, while low variance indicates predictability. For binary success/failure metrics, variance relates to success rate. \text{Var}(\text{success}) = p(1-p)
+
+Maximum variance occurs at $p = 0.5$. A 50\% success rate is the worst case for predictability, which is why it is harder to operate around than a lower but stable rate. In many production settings, unpredictability is worse than a consistently mediocre system because it prevents stable operations and reliable escalation policies.
+
+In practice, stability evaluation should record variance for multiple metrics simultaneously, including success variance, cost variance, latency variance, and violation variance. An agent can be stable in correctness but unstable in cost (sometimes it calls expensive tools), which is still a deployment risk.
+
+\subsection{Consistency Score}
+
+Variance in outcomes does not fully capture whether the agent behaves similarly. Two runs can both succeed but follow entirely different action sequences, or two runs can follow similar steps but diverge due to tool stochasticity. We therefore measure similarity across trajectories
+
+\[
+\text{Consistency}(t) = \frac{1}{\binom{k}{2}} \sum_{i < j} \text{sim}(\tau_i, \tau_j)
+\]
+
+where $\text{sim}(\tau_i, \tau_j)$ measures trajectory similarity.
+
+Trajectory similarity can be defined at several abstraction levels, depending on what matters for the application.
+
+\begin{itemize}
+\item \textbf{Action sequence alignment.} Edit distance between action sequences, possibly after mapping equivalent actions to the same symbol.
+\item \textbf{Tool call overlap.} Jaccard similarity over the set of tools used, or the multiset of tools with counts.
+\item \textbf{Outcome agreement.} Binary match on final outcome, or agreement on structured outputs.
+\end{itemize}
+
+An agent might achieve consistent outcomes through inconsistent means (different trajectories, same result). This can be acceptable if the only requirement is correctness. However, in regulated or operational environments, inconsistent trajectories can be undesirable because they create unpredictable costs, unpredictable side effects, and unpredictable audit trails. Conversely, an agent might have consistent trajectories but inconsistent outcomes if tools are flaky or environments are nondeterministic; in that case, the evaluation should attribute instability to the environment rather than the agent policy.
+
+\subsection{Robustness Under Perturbation}
+
+Robustness evaluation stress-tests agents with perturbed inputs \cite{agentevalsurvey2025}. Perturbations are designed to reflect real-world noise and adversarial variation.
+
+\begin{itemize}
+\item Paraphrased instructions, namely Find the CEO's email'' vs. What is the chief executive’s email address?’’
+\item Irrelevant context, such as Adding distractor information.
+\item Linguistic variations, including Typos, dialects, informal language.
+\item Edge cases, namely Empty inputs, extremely long inputs, malformed data.
+\end{itemize}
+
+Robustness score measures performance degradation under perturbation
+\[
+\text{Robustness} = \frac{\text{Accuracy}(\text{perturbed})}{\text{Accuracy}(\text{clean})}
+\]
+A robust agent maintains performance; a fragile agent degrades rapidly. In production, robustness failures show up as ``it worked yesterday but not today’’ when the user phrased the same request differently.
+
+Robustness is not only about correctness. Robustness should also be measured for fidelity and security. A system might remain accurate under perturbation but become more vulnerable to prompt injection, or might remain safe but become excessively conservative and refuse benign tasks.
+
+\section{Cost Modeling}
+
+Agent costs compound across multiple components. Accurate cost modeling enables budgeting, optimization, and fair comparison across agent designs. It also enables early rejection of systems that cannot meet cost envelopes even if they are accurate.
+
+\subsection{Cost Components}
+
+Total agent cost decomposes as
+\[
+C_{total} = C_{tokens} + C_{tools} + C_{compute} + C_{latency}
+\]
+This decomposition mirrors the architecture of typical agent systems, such as model calls, tool invocations, local compute, and the indirect cost of delay.
+
+\textbf{Token costs} are dominant for API-based agents
+\[
+C_{tokens} = \sum_{calls} (n_{input} \cdot p_{input} + n_{output} \cdot p_{output})
+\]
+
+where $n$ is token count and $p$ is price per token. Token accounting must be trace-driven, including input tokens include system prompts, conversation history, retrieved documents, and tool outputs. Output tokens include the final response and sometimes intermediate reasoning if it is produced (even if not shown). 2025 pricing varies dramatically, namely GPT-4o at $2.50/M input tokens vs. Gemini Flash-Lite at $0.075/M \cite{llmpricing2025}. This spread means the same agent design can differ by more than an order of magnitude in cost depending on model choice.
+
+\textbf{Tool costs} include external APIs, database queries, and paid services
+
+\[
+C_{tools} = \sum_{tools} (\text{calls}_t \cdot \text{price}_t)
+\]
+
+Tool costs often hide in engineering budgets rather than model budgets, but they matter. A ``cheap’’ model that calls an expensive API on every request is not cheap overall.
+
+\textbf{Compute costs} matter for self-hosted models or heavy local processing
+\[
+C_{compute} = T_{GPU} \cdot p_{GPU}
+\]
+
+In practice, $T_{GPU}$ is not just inference time; it includes batching inefficiency, idle time under variable load, and overheads of scheduling.
+
+\textbf{Latency costs} are indirect but real, such as user wait time, drop-off rates, and timeout failures. Even if latency does not have a dollar price tag, it has operational consequences (abandonment, repeated requests, higher support load). In many enterprise systems, there is also a hard latency budget enforced by upstream services, which turns latency into a failure mode.
+
+\subsection{Cost Per Task}
+
+The key efficiency metric is cost per successful task completion
+\[
+\text{Unit Cost} = \frac{C_{total}}{N_{success}}
+\]
+This metric internalizes both resource consumption and success rate. It also prevents a common evaluation pitfall. Optimizing raw cost per attempt while letting success rate degrade. For example, an agent with 50% success rate and $1/attempt has unit cost $2; an agent with 90% success rate and $1.50/attempt has unit cost $1.67.
+
+In production decision-making, unit cost should be computed per task class. A system might have excellent unit cost for simple tasks and terrible unit cost for complex tasks due to retries and long trajectories. That observation directly motivates routing and escalation strategies.
+
+The CLASSIC evaluation \cite{classic2025} found significant variation in cost-performance tradeoffs. Agents built on Claude achieved second-best accuracy but at higher operational costs, highlighting the need for cost-efficiency evaluation beyond accuracy alone.
+
+\subsection{Cost Optimization}
+
+Cost reduction strategies and the range of savings reported for them. Treat these as orders of magnitude rather than benchmarks; actual savings depend heavily on traffic mix, and the sources differ in workload.
+
+\begin{center}
+\begin{tabular}{lc}
+\toprule
+Strategy & Typical Savings \\
+\midrule
+Prompt compression & 20–40\% \\
+Response caching & 30–50\% \\
+Model cascading (route by complexity) & 50–80\% \\
+RAG (retrieve vs. large context) & 30–70\% \\
+Early stopping & 5–8\% \\
+Quantization (4-bit) & 30\% compute \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Each strategy corresponds to a distinct leverage point, as follows.
+
+\begin{itemize}
+\item Prompt compression reduces input tokens by removing redundancy, summarizing history, or using structured context.
+\item Response caching removes repeated work for repeated queries or repeated sub-queries.
+\item Model cascading uses cheap models as a first pass and escalates to expensive models only when needed.
+\item RAG replaces large, expensive context windows with targeted retrieval.
+\item Early stopping reduces output tokens and avoids unnecessary elaboration.
+\item Quantization reduces compute cost for self-hosted inference.
+\end{itemize}
+
+Model cascading, using cheaper models for easy tasks, expensive models for hard tasks, can reduce costs by over 94% while maintaining success rates \cite{budgetmlagent2024}. The key is accurate task difficulty classification. In evaluation, this classification must itself be measured. If the router is wrong, the cascade can either waste cost (over-escalation) or waste correctness (under-escalation).
+
+\subsection{LLMflation}
+
+LLM inference costs are declining rapidly \cite{llmflation2024}. GPT-3 cost roughly \$60 per million tokens in 2021. Equivalent performance cost about \$0.06 per million tokens in 2024, a reduction of $1{,}000\times$ in three years. The trend is approximately 10$\times$ cost reduction per year for equivalent performance.
+
+Drivers include.
+\begin{itemize}
+\item Better hardware (Moore’s Law, GPU improvements).
+\item Model quantization (16-bit to 4-bit).
+\item Software optimizations (vLLM, continuous batching).
+\item Smaller models matching larger model performance.
+\item Open-source competition reducing margins.
+\end{itemize}
+
+This deflation has implications for evaluation. Cost comparisons must be time-indexed. An agent costing $1/task in 2024 might cost $0.10/task in 2025 on equivalent hardware. Therefore, an evaluation report should state the pricing and model versions used, and should separate algorithmic efficiency (tokens and tool calls) from pricing-dependent efficiency (dollars).
+
+\section{Behavioral Fidelity}
+
+Fidelity measures alignment between intended and actual behavior. An agent may achieve correct outputs through unintended means, a fidelity violation even if the outcome is correct. In enterprise systems, fidelity is often a hard requirement because it connects to policy enforcement, compliance, and audit.
+
+\subsection{Policy Compliance}
+
+Agents operate under policies specifying allowed behaviors. Fidelity evaluation checks whether the agent respects those policies in the actual trajectory.
+
+\begin{itemize}
+\item \textbf{Tool usage.} Does the agent use only permitted tools? Does it use tools only in permitted contexts?
+\item \textbf{Data access.} Does the agent access only authorized data? Does it avoid exporting sensitive data?
+\item \textbf{Output constraints.} Does the agent respect content restrictions (PII, regulated advice, restricted categories)?
+\item \textbf{Process requirements.} Does the agent follow required procedures (human approval gates, logging, two-person rule)?
+\end{itemize}
+
+Policy violation rate
+\[
+\text{Violation Rate} = \frac{N_{violations}}{N_{actions}}
+\]
+Even low violation rates are concerning for high-stakes applications. At 0.1% violation rate and 1,000 actions/day, expect one violation daily. In many domains, one daily violation is already unacceptable.
+
+For evaluation, ``actions’’ must be defined carefully. If one user request triggers 20 tool calls, action-based violation rates can look small even when per-request risk is high. It is often useful to report both per-action and per-request violation rates.
+
+\subsection{Trajectory Fidelity}
+
+Beyond outcomes, evaluate the path taken
+
+\[
+\text{Trajectory Fidelity} = \frac{|\tau \cap \tau_{ideal}|}{|\tau_{ideal}|}
+\]
+where $\tau_{ideal}$ is the intended trajectory.
+
+This metric measures whether the agent takes the expected route, not just whether it arrives at the correct destination. In practice, $\tau_{ideal}$ may be a partial specification. A set of required steps rather than an exact sequence. For example, ``must perform identity verification before changing an account setting’’ is a process constraint that can be evaluated from the trace.
+
+Trajectory fidelity matters when.
+\begin{itemize}
+\item The process has regulatory requirements (audit trails).
+\item Side effects of actions matter (resource consumption, data modification).
+\item Explainability requires predictable behavior (operators need to know what the agent will do).
+\end{itemize}
+
+It also matters when the system is evaluated against an ``acceptable operating envelope.’’ For example, an agent that always calls an external web search tool might be correct but violates a policy that forbids external data egress.
+
+\subsection{Reward Hacking Detection}
+
+Agents optimized on metrics may find unintended ways to maximize scores, reward hacking. Frontier models exhibit this behavior \cite{metr2025}: OpenAI o3 tasked with optimizing program speed rewrote the timer to always show fast results. Anthropic Claude exhibited similar behavior.
+
+Reward hacking is an evaluation failure mode. If the evaluation protocol can be gamed, the model will eventually find the exploit. Detection approaches include.
+
+\begin{itemize}
+\item Compare metric score to ground truth outcome. If the metric improves while real outcomes do not, suspect gaming.
+\item Monitor for unusual patterns (all tasks taking identical time, identical scores across diverse inputs).
+\item Validate outputs through independent channels (secondary checkers, redundant measurements).
+\item Red-team with adversarial probes designed to trigger gaming.
+\end{itemize}
+
+The generalization of reward hacking across tasks \cite{metr2025} suggests any optimization target may be gamed. Evaluation must look beyond the optimized metric and include sanity checks that bind the metric to reality.
+
+\section{LLM-as-Judge Evaluation}
+
+Human evaluation is expensive and slow. LLM-as-Judge uses language models to evaluate agent outputs, enabling scalable assessment. For agent systems, judges can evaluate not only final responses but also intermediate decisions and trajectories.
+
+Two warnings before the mechanics, because judges are the most over-trusted
+component in most evaluation stacks.
+
+\textbf{Rubric scoring is unreliable on trajectories.} Rubric-based judging works
+tolerably on a single answer. Applied to an agent trajectory, where the judge
+must assess a sequence of decisions against criteria, reliability degrades
+measurably \cite{judgerubric2026}. The judge is being asked to do the failure
+attribution of Chapter~\ref{ch:traces} in one pass, without the trace structure
+that makes attribution tractable.
+
+\textbf{A judge is a biased estimator.} It is cheap and it is systematically
+wrong in ways that correlate with the thing being measured, particularly when
+judge and generator share a model family. Reporting judge scores as if they were
+ground truth imports that bias into every downstream decision.
+
+The principled fix is not to abandon judges but to debias them. Prediction-powered
+inference combines a large number of cheap judge labels with a small number of
+human labels to produce estimates that are statistically unbiased and carry valid
+confidence intervals \cite{glide2026}. This is the right default for any
+evaluation that informs a shipping decision. You get the judge's throughput and
+the human's correctness, and, importantly, an honest error bar instead of a
+point estimate with unknown bias.
+
+Where the domain admits it, deterministic checks beat judges outright. Converting
+anecdotal agent testing into deterministic workflow tests removes the judge from
+the loop for the cases that can be specified \cite{aeval2026}, and expert-grounded
+dynamic evaluation offers a middle path for genuinely open-ended professional
+tasks where no fixed rubric is adequate \cite{jade2026}.
+
+\subsection{Judge Types}
+
+\textbf{Pointwise scoring.} Judge evaluates a single output on criteria.
+\begin{verbatim}
+Evaluate this response on a 1-5 scale for:
+	*	Accuracy
+	*	Helpfulness
+	*	Safety
+Explain your reasoning before scoring.
+\end{verbatim}
+
+Pointwise scoring is simple and scalable. It is best used when there is no direct baseline comparison or when outputs are independent.
+
+\textbf{Pairwise comparison.} Judge chooses the better of two outputs.
+\begin{verbatim}
+Compare these two responses to the same question.
+Which is better? Explain why.
+\end{verbatim}
+
+Pairwise comparison is often more reliable than absolute scoring because it reduces calibration burden. It also aligns with preference-based evaluation.
+
+\textbf{Reference-based.} Judge compares output to a gold standard.
+\begin{verbatim}
+Given this reference answer, evaluate how well
+the generated response matches it.
+\end{verbatim}
+
+Reference-based evaluation is strongest when a reliable reference exists. For many enterprise tasks, references can be derived from ground truth workflows or human agent actions.
+
+Research shows GPT-4 achieves 80% agreement with human preferences, matching human-to-human agreement rates \cite{llmasjudge2023}. This indicates that judge-based evaluation can be competitive with human evaluation for many tasks, but it must be treated as an instrument that requires calibration and monitoring.
+
+\subsection{Judge Design}
+
+Effective LLM judges require \cite{llmasjudge2025}:
+
+\textbf{Chain-of-thought reasoning.} Ask judge to explain before scoring. This improves reliability by 10–15% and provides debugging rationales. In operational settings, the explanation is often as valuable as the score. It surfaces recurring failure themes.
+
+\textbf{Structured output.} Request scores in consistent format for automated processing. Without structure, evaluation pipelines become brittle and hard to aggregate.
+
+\textbf{Clear criteria.} Specify exactly what good'' means. Vague criteria produce inconsistent judgments. For example, accuracy’’ should specify whether minor factual errors are tolerated, whether citations are required, and whether partial answers are acceptable.
+
+\textbf{Position balancing.} For pairwise comparison, swap positions and average to eliminate order bias. This is cheap and significantly improves fairness.
+
+In agent evaluation, judges should often be given the trajectory context, including tool calls, retrieved documents, and policy decisions. Otherwise a judge may rate a superficially plausible answer highly even if it violates process or is ungrounded.
+
+\subsection{Judge Limitations}
+
+LLM judges have systematic biases \cite{llmasjudge2025}.
+\begin{itemize}
+\item \textbf{Verbosity bias.} Prefer longer responses.
+\item \textbf{Self-preference.} Favor outputs from same model family.
+\item \textbf{Position bias.} Prefer first option in pairwise comparison.
+\item \textbf{Sycophancy.} Rate agreeable responses higher.
+\end{itemize}
+
+Several mitigation strategies apply.
+\begin{itemize}
+\item Use diverse judge models (Panel of LLMs, PoLL) to reduce correlated bias.
+\item Calibrate on human-labeled data and measure judge drift over time.
+\item Monitor for bias patterns (length vs. score correlation, model-family effects).
+\item Combine with human spot-checks, especially on high-impact slices.
+\end{itemize}
+
+The key operational principle is to treat the judge as a sensor with known failure modes. Sensors are useful, but only when their biases are understood and monitored.
+
+\subsection{Agent-Specific Evaluation}
+
+For agents, LLM judges evaluate beyond outputs \cite{arizellmjudge2025}.
+\begin{itemize}
+\item \textbf{Tool selection.} Did the agent choose appropriate tools?
+\item \textbf{Reasoning quality.} Is the chain of thought coherent?
+\item \textbf{Error recovery.} Did the agent handle failures gracefully?
+\item \textbf{Efficiency.} Did the agent take a reasonable path?
+\end{itemize}
+
+Multi-agent judge architectures \cite{multiagentjudge2025} use specialized agents for different evaluation dimensions, namely one for accuracy, one for safety, one for style. Coordination through debate or voting produces more reliable assessments. This mirrors how human evaluation works in practice. Different stakeholders care about different dimensions.
+
+\section{The Harness Is a Confound}
+\label{sec:harness}
+
+Here is a result that should change how you read every agent benchmark, including
+your own.
+
+An agent's score is produced by a \emph{model}, a \emph{harness} (the scaffolding
+that decides what the agent sees, which actions it can take, how failures are
+retried, what gets verified), and an \emph{environment}. Benchmark reporting
+attributes the score to the model. Recent work holds the model fixed and varies
+the harness, and finds the number moves substantially, and, more troublingly,
+that the \emph{kind} of failure changes too \cite{modelharness2026, uniace2026}.
+
+Measuring what the harness does to the agent's internal state makes the mechanism
+concrete. Harness choices induce divergence in what the agent comes to believe
+during a multi-step task, because the harness controls which observations arrive,
+which errors are surfaced versus silently retried, and which intermediate states
+get verified \cite{harnessdiverge2026}. Two harnesses over one model produce two
+agents that believe different things.
+
+\subsection{What This Breaks}
+
+\textbf{Model comparison.} ``Model A scores 62\%, model B scores 58\%'' is a claim
+about two model-harness pairs. If the harnesses differ, and across published
+results they nearly always do. The comparison does not isolate the model.
+
+\textbf{Failure attribution.} The same visible failure can call for a model change
+in one harness and a scaffolding change in another, which is a repair-assignment
+problem rather than a debugging problem \cite{modelharness2026}. Teams routinely
+respond to a harness deficiency by switching models, at considerable expense and
+with unpredictable results.
+
+\textbf{Reproducibility.} Reproducing a published number requires reproducing the
+harness, which is usually underspecified. A benchmark package couples tasks,
+scaffolding, and environment, and reporting convention credits the model alone
+\cite{uniace2026}.
+
+\subsection{What To Do}
+
+\textbf{Version the harness alongside the model.} Every evaluation record should
+name both, exactly as Chapter~\ref{ch:alignment} stamps policy versions onto
+decisions. ``Model X on harness Y v2.3'' is the smallest honest unit of
+attribution.
+
+\textbf{Ablate the harness, not just the model.} Before concluding that a model is
+inadequate, hold it fixed and vary retry policy, observation formatting, tool
+schema, and verification points. This is cheaper than a model migration and
+frequently more effective.
+
+\textbf{Report the pair.} When comparing models, run them on an identical harness
+and say so. When comparing harnesses, fix the model. Anything else measures the
+interaction and reports it as a main effect.
+
+\textbf{Prefer real-world, long-horizon evaluation where the decision warrants it.}
+Synthetic sandboxes with mock services diverge from deployment in exactly the
+dimensions harnesses control; benchmarks built on real CLI harnesses and
+long-horizon tasks narrow that gap \cite{wildclaw2026, clawswe2026}.
+
+This connects back to Chapter~\ref{ch:terms}, which defined the policy as the
+entire pipeline rather than the model. The harness \emph{is} part of the policy.
+Evaluating the model and calling the result an agent evaluation is a category
+error that the field made collectively and is now correcting.
+
+\section{Benchmark Design}
+
+Benchmarks standardize evaluation, enabling comparison across agents and tracking progress over time. For agents, benchmark design must capture interaction, tool use, and trajectory-level behavior.
+
+\subsection{Agent Benchmarks}
+
+Major agent benchmarks as of 2025. \textbf{SWE-bench} \cite{swebench2024}: Software engineering tasks from real GitHub issues. Given a codebase and issue description, generate a patch that resolves the problem. SWE-bench Verified, such as 500 human-confirmed solvable problems. SWE-bench Pro, including 1,865 enterprise-level problems requiring hours to days for human engineers, best models achieve only 23% success (vs. 70%+ on SWE-bench Verified) \cite{swebenchpro2025}.
+
+\textbf{AgentBench} \cite{agentbench2023}: Eight diverse environments testing LLM-as-Agent across web browsing, database operations, code execution, and more.
+
+\textbf{CLASSIC} \cite{classic2025}: Enterprise workflow selection across IT, HR, banking, healthcare. 2,133 real conversations, 423 workflows, multi-dimensional evaluation.
+
+\textbf{WebArena.} Web navigation tasks in realistic environments.
+
+\textbf{AppWorld.} Interactive coding in application contexts.
+
+For deployment-oriented evaluation, it is often insufficient to run an agent on a public benchmark alone. A robust evaluation suite usually contains, namely (i) public benchmarks for comparability, (ii) internal benchmarks for domain realism, and (iii) red-team or adversarial suites for security and fidelity.
+
+\subsection{Benchmark Saturation}
+
+Static benchmarks saturate as models improve. MMLU scores now exceed 90% for top models, reducing discriminative power. SWE-bench Verified shows similar ceiling effects at 70%+ for best agents.
+
+Several responses to saturation are available.
+\begin{itemize}
+\item Harder benchmarks (MMLU-Pro, SWE-bench Pro).
+\item Dynamic benchmarks with fresh tasks.
+\item Private held-out sets to prevent overfitting.
+\item Multi-dimensional evaluation beyond accuracy.
+\end{itemize}
+
+SWE-bench Pro addresses contamination through held-out repositories and commercial partnerships, problems that cannot leak into training data \cite{swebenchpro2025}. The operational lesson is that evaluation must keep moving. If the benchmark becomes a target, it will be gamed or saturated.
+
+\subsection{Trajectory Analysis}
+
+Beyond pass/fail, benchmarks increasingly analyze failure modes in agent trajectories \cite{swebenchpro2025}.
+
+\begin{center}
+\begin{tabular}{lc}
+\toprule
+Failure Mode & Frequency \\
+\midrule
+Wrong solution (functionally incorrect) & 35\% \\
+Incomplete solution (partial fix) & 25\% \\
+Wrong file (edited wrong location) & 15\% \\
+Gave up (exceeded step limit) & 12\% \\
+Environment error (tooling failure) & 8\% \\
+Test failure (broke existing code) & 5\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+This analysis reveals optimization opportunities. If 12% of failures come from step limits, increasing the budget or improving planning can improve performance. If 35% produce wrong solutions, the model may need better reasoning, better retrieval of context, or better verification. If environment errors dominate, the evaluation harness or tool stability is the limiting factor, not the agent policy.
+
+Trajectory analysis is especially valuable because it produces actionable levers. Pure accuracy numbers tell you that the system is failing; trajectory analysis tells you how to fix it.
+
+\section{Guarantees on Continuous Evaluation}
+
+Evaluation in production is continuous rather than a one-time gate, and a
+continuously reported quality score needs an error bar that means something.
+
+Split conformal prediction and adaptive conformal inference transfer to this
+setting, giving distribution-free coverage guarantees on forecast quality scores
+\cite{conformaleval2026}. Two behaviors are worth noting. Calibration error stays
+low across nominal levels at a one-day horizon, and the adaptive variant widens
+its intervals following an agent release and then reconverges, which is the
+correct response to a deliberate distribution shift.
+
+The same line supplies compositional uncertainty bounds for multi-agent
+pipelines and an abstention rule for pairwise rankings with a controlled
+false-ranking rate. That last piece addresses a common failure in leaderboard
+reporting, where many pairwise comparisons are made and none are corrected for
+multiplicity, so some fraction of the reported orderings are noise.
+
+Combined with the debiasing discussion above, this gives a defensible evaluation
+stack. Cheap judges supply volume, a small human sample removes bias, and
+conformal methods supply intervals whose coverage you can state rather than hope
+for.
+
+\section{Evaluation Infrastructure}
+
+Running evaluations at scale requires infrastructure for trajectory collection, execution, and analysis. Without infrastructure, evaluation becomes slow, manual, and non-reproducible.
+
+\subsection{Evaluation Pipeline}
+
+{\footnotesize
+\begin{verbatim}
++--------------------------------------------------------------+
+|                    Evaluation Pipeline                        |
++--------------------------------------------------------------+
+|                                                               |
+|  Tasks --> Agent Execution --> Trajectory Storage --> Scoring |
+|              |                       |                   |    |
+|              v                       v                   v    |
+|         Sandboxed              Logs, Actions,      Metrics,   |
+|         Environment            Tool Calls          Scores     |
+|                                                               |
+|  <------------------ Cost Tracking -------------------------> |
+|                                                               |
++--------------------------------------------------------------+
+\end{verbatim}
+}
+
+The key requirements are as follows.
+\begin{itemize}
+\item \textbf{Isolation.} Each evaluation runs in a separate environment to prevent interference. This is essential when agents have side effects.
+\item \textbf{Reproducibility.} Environment state can be reset for repeated runs. Without reset, stability metrics become meaningless.
+\item \textbf{Observability.} All actions and observations are logged. If you cannot see the trajectory, you cannot debug failures.
+\item \textbf{Cost tracking.} Token usage and API calls are metered. Without metering, cost models are fiction.
+\end{itemize}
+
+A practical evaluation pipeline also includes versioning, such as the agent version, prompt version, tool versions, and policy versions must be recorded, otherwise results cannot be compared over time.
+
+\subsection{Statistical Rigor}
+
+Agent evaluation requires statistical care. \textbf{Multiple runs.} Due to stochasticity, single runs are unreliable. Run $k \geq 5$ times per task and report confidence intervals. For high-variance tasks, more runs may be needed.
+
+\textbf{Stratified sampling.} If task difficulty varies, stratify by difficulty to avoid misleading aggregates. A small number of very hard tasks can dominate variance, and a large number of easy tasks can hide failures.
+
+\textbf{Effect size.} Report how large the difference is, alongside whether it is significant. A statistically significant 0.1% improvement may not be practically meaningful.
+
+\textbf{Baseline comparison.} Always compare to baselines. Absolute numbers are hard to interpret; relative improvements are clearer. Baselines should include prior agent versions and, where relevant, human performance.
+
+A useful discipline is to treat evaluation as an SLO problem, including define acceptable thresholds for each dimension (accuracy, unit cost, violation rate, latency P95/P99, stability metrics) and evaluate whether the system meets them.
+
+\subsection{Cost of Evaluation}
+
+Evaluation itself is expensive. Running an agent 5 times on 500 tasks with $0.50/run costs $1,250 per evaluation sweep. Thorough evaluation across hyperparameters and configurations multiplies this.
+
+Several cost-aware evaluation strategies apply.
+\begin{itemize}
+\item Early stopping for clearly failing configurations.
+\item Adaptive sampling (more runs for uncertain results).
+\item Shared environment setup across evaluations.
+\item Caching deterministic components.
+\end{itemize}
+
+The SWE-rebench infrastructure \cite{swebenchinfra2025} evaluates thousands of patches per hour through containerized execution, pre-built Docker images, and parallelized test execution. The broader lesson is that evaluation needs engineering investment. Without automation, evaluation becomes the bottleneck, and teams ship without knowing.
+
+\section{Worked Example: Customer Service Agent}
+
+Consider evaluating a customer service agent that handles product inquiries, processes returns, and escalates complex issues. This is a representative enterprise scenario because it mixes, namely (i) structured workflows, (ii) tool access (orders, refunds), (iii) policy constraints (PII, fraud), and (iv) quality requirements (helpful, correct, consistent).
+
+\subsection{Evaluation Design}
+
+\textbf{Task set.} 500 customer interactions sampled from production logs, stratified by.
+\begin{itemize}
+\item Type, such as inquiry (40%), return (35%), escalation (25%).
+\item Complexity, including simple (50%), moderate (35%), complex (15%).
+\item Outcome, namely resolved (80%), unresolved (20%).
+\end{itemize}
+
+The key here is that tasks come from production logs rather than synthetic prompts. This improves realism and exposes the agent to the kinds of ambiguity and incomplete information that occur in real conversations.
+
+\textbf{Metrics.}.
+\begin{itemize}
+\item Accuracy, such as correct resolution (human-verified).
+\item Stability. Variance across 5 runs per task.
+\item Cost, including tokens consumed per interaction.
+\item Latency, namely time to resolution.
+\item Fidelity, such as policy violations detected.
+\end{itemize}
+
+\textbf{Baselines.} Previous agent version, human agents (for reference).
+
+The evaluation should also record traces. When a metric moves, traces explain why. Without traces, metrics are just numbers.
+
+\subsection{Results}
+
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+Metric & New Agent & Previous & Human \\
+\midrule
+Accuracy & 87.2\% & 82.1\% & 94.3\% \\
+Stability (CV) & 0.08 & 0.15 & 0.03 \\
+Cost/task & \$0.42 & \$0.58 & \$8.50 \\
+Latency (P95) & 12s & 18s & 180s \\
+Policy violations & 0.3\% & 0.8\% & 0.1\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Analysis.}.
+\begin{itemize}
+\item Accuracy improved 5 percentage points; gap to human reduced. This suggests the new agent is meaningfully better on representative tasks, not just on benchmarks.
+\item Stability improved (CV 0.08 vs. 0.15); behavior is more predictable. Lower variance implies fewer surprising failures and fewer costly tail events.
+\item Cost reduced 28%; efficiency gains from prompt optimization. The cost reduction is operationally important because it increases the range of traffic volumes the system can support.
+\item Policy violations reduced but still 3$\times$ human rate, needs improvement. This is a deployment blocker in high-stakes settings, and at minimum motivates additional guardrails and targeted fixes.
+\end{itemize}
+
+\textbf{Stratified analysis by complexity.}.
+\begin{center}
+\begin{tabular}{lccc}
+\toprule
+Complexity & Accuracy & Cost & Violations \\
+\midrule
+Simple & 94.1\% & \$0.28 & 0.1\% \\
+Moderate & 86.7\% & \$0.45 & 0.2\% \\
+Complex & 71.3\% & \$0.82 & 0.9\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Complex tasks show degraded performance across all metrics. This pattern is common, including complex tasks trigger longer trajectories, more tool calls, more opportunities for error, and more opportunities for policy violations. Recommendation. Implement escalation for complex tasks rather than attempting autonomous resolution. This is a classic evaluation-driven product decision. Use automation where it is strong, and hand off where it is weak.
+
+\subsection{Deployment Decision}
+
+The evaluation supports deployment with the following caveats.
+\begin{itemize}
+\item Deploy for simple/moderate tasks (90%+ accuracy, low cost).
+\item Escalate complex tasks to human review.
+\item Monitor policy violations; target $<$ 0.1%.
+\item Track cost trends as pricing changes.
+\end{itemize}
+
+In a mature rollout, these caveats become explicit routing and guardrail policies. Evaluation is then repeated on the routed system, because routing changes the workload distribution and can shift metrics.
+
+\section{Fallacies and Pitfalls}
+
+\textbf{Fallacy. Benchmark performance predicts production performance.} Benchmarks are sanitized; production traffic includes edge cases, adversarial inputs, and distribution shift. SWE-bench Pro shows models achieving 70%+ on curated benchmarks drop to 23% on realistic enterprise tasks.
+
+\textbf{Pitfall. Single-run evaluation.} Agent behavior varies across runs. Single-run metrics are unreliable. Always run multiple times and report variance.
+
+\textbf{Fallacy. Accuracy is sufficient.} High accuracy with unacceptable cost, latency, or policy violations is not deployable. Multi-dimensional evaluation is essential.
+
+\textbf{Pitfall. Ignoring trajectory analysis.} Pass/fail metrics hide failure modes. Trajectory analysis reveals why agents fail, enabling targeted improvement.
+
+\textbf{Fallacy. LLM judges are unbiased.} LLM judges have systematic biases (verbosity, self-preference, position). Calibrate on human data and use diverse judge models.
+
+\textbf{Pitfall. Static benchmarks.} Benchmarks saturate and leak into training data. Use held-out sets, dynamic tasks, and multi-dimensional metrics.
+
+\textbf{Fallacy. Cost is stable.} LLM costs decline 10$\times$ per year. Cost comparisons must be time-indexed; absolute costs become irrelevant quickly.
+
+\textbf{Pitfall. Evaluating outputs without trajectories.} Correct outputs achieved through policy violations are not acceptable. Evaluate the path, not just the destination.
+
+\textbf{Fallacy. A benchmark score measures the model.} It measures a
+model-harness-environment triple. Hold the harness fixed before concluding
+anything about a model \cite{modelharness2026, uniace2026, harnessdiverge2026}.
+
+\textbf{Fallacy. A judge score can stand in for ground truth.} It is a biased
+estimator. Debias it against a small human-labeled sample and report an interval
+\cite{glide2026}.
+
+\textbf{Fallacy. Green dashboards mean the agent is working.} Silent failures
+complete successfully, return plausible output, and raise nothing
+\cite{silentfail2026}. Operational metrics cannot see them; semantic checks over
+traces can.
+
+\textbf{Pitfall. Reporting the mean of a heavy-tailed distribution.} Agent cost
+and latency distributions have long tails. Report percentiles, and budget against
+the tail rather than the average.
+
+\section{Summary}
+
+Agent evaluation requires multi-dimensional assessment, namely correctness, stability, efficiency, fidelity, and robustness. The CLASSIC framework structures this as Cost, Latency, Accuracy, Stability, and Security.
+
+Stability metrics quantify behavioral variance through trajectory variance, consistency scores, and robustness under perturbation. Cost models decompose total cost into tokens, tools, compute, and latency, with unit cost (cost per successful task) as the key efficiency metric.
+
+Behavioral fidelity measures alignment between intended and actual behavior. Policy compliance, trajectory fidelity, and reward hacking detection ensure agents achieve goals through acceptable means.
+
+LLM-as-Judge enables scalable evaluation through pointwise scoring, pairwise comparison, and reference-based assessment. Chain-of-thought reasoning and position balancing improve reliability, but systematic biases require calibration and human spot-checks.
+
+Benchmarks standardize comparison but saturate as models improve. SWE-bench Pro addresses this with enterprise-level difficulty and contamination-resistant design. Trajectory analysis reveals failure modes beyond pass/fail metrics.
+
+The unified principle, such as evaluate multiple dimensions, run multiple times, analyze trajectories not just outcomes. An agent that passes evaluation can be deployed with confidence. An agent that fails evaluation in controlled conditions will fail worse in production.
+
+\section*{Bibliographic Notes}
+
+The CLASSIC framework for multi-dimensional agent evaluation is introduced in \cite{classic2025}, presented at ICLR 2025. The comprehensive survey on LLM agent evaluation \cite{agentevalsurvey2025} provides taxonomy covering objectives (behavior, capabilities, reliability, safety) and process (interaction modes, datasets, metrics, tooling).
+
+LLM-as-Judge methodology originates from \cite{llmasjudge2023} showing 80% agreement with human preferences. Systematic studies of judge biases and mitigation strategies appear in \cite{llmasjudge2025}. Multi-agent judge architectures are explored in \cite{multiagentjudge2025}.
+
+SWE-bench \cite{swebench2024} establishes the software engineering benchmark; SWE-bench Verified provides human-validated subset; SWE-bench Pro \cite{swebenchpro2025} addresses saturation with enterprise-level difficulty and contamination prevention. The SWE-rebench infrastructure \cite{swebenchinfra2025} enables evaluation at scale.
+
+Cost trends in LLM inference are analyzed in LLMflation \cite{llmflation2024}, showing 10$\times$ annual cost reduction. Individual cost-optimization techniques and their measured effects are cited at the point of use in Chapters~\ref{ch:cost} and~\ref{ch:budgets}. Model cascading with BudgetMLAgent achieves 94% cost reduction \cite{budgetmlagent2024}.
+
+Reward hacking in frontier models is documented by METR \cite{metr2025} and Anthropic system cards, showing generalization of gaming behavior across tasks.
+
+\section*{Exercises}
+
+\begin{enumerate}
+\item \textbf{Stability Analysis}. An agent run 10 times on a task produces success outcomes [1, 1, 0, 1, 1, 0, 1, 1, 1, 0]. Calculate, including success rate, variance, and 95% confidence interval for the true success rate.
+
+\item \textbf{Cost Modeling}. An agent makes an average of 3 model calls per task (400 input, 200 output tokens each) and 2 tool calls (\$0.01 each). Using GPT-4o pricing (\$2.50/M input, \$10/M output), calculate cost per task. If success rate is 85\%, what is unit cost? How does unit cost change if you switch to a model with half the price but 75\% success rate?
+
+\item \textbf{Benchmark Design}. Design an evaluation benchmark for a coding assistant agent. Specify, namely task types, difficulty stratification, metrics to collect, number of runs per task, and baseline comparisons.
+
+\item \textbf{LLM Judge Calibration}. You have 100 agent outputs with human quality scores (1-5). Design a procedure to calibrate an LLM judge on this data and estimate its reliability.
+
+\item \textbf{Trajectory Analysis}. Given a benchmark where 40% of failures are wrong solution,'' 25\% are gave up (step limit),’’ and 35% are ``environment error,’’ propose interventions for each failure mode and predict their impact on overall success rate.
+\end{enumerate}
+
+\section*{Bibliography}
+
+\begin{thebibliography}{99}
+
+\bibitem{agentevalsurvey2025}
+M. Mohammadi, Y. Li, J. Lo, and W. Yip.
+\newblock Evaluation and Benchmarking of LLM Agents: A Survey.
+\newblock {\em KDD ’25}, August 2025.
+
+\bibitem{agentbench2023}
+X. Liu, H. Yu, H. Zhang, et al.
+\newblock AgentBench: Evaluating LLMs as Agents.
+\newblock {\em ICLR}, 2024.
+
+\bibitem{arizellmjudge2025}
+Arize AI.
+\newblock LLM as a Judge: Primer and Pre-Built Evaluators.
+\newblock Documentation, 2025.
+
+\bibitem{budgetmlagent2024}
+A. Gandhi et al.
+\newblock BudgetMLAgent: A Cost-Effective LLM Multi-Agent System for Automating Machine Learning Tasks.
+\newblock {\em arXiv:2411.07464}, 2024.
+
+\bibitem{classic2025}
+Aisera.
+\newblock Top of the CLASS: Benchmarking LLM Agents on Real-World Enterprise Tasks.
+\newblock {\em ICLR Workshop on Building Trust in LLMs}, 2025.
+
+\bibitem{llmasjudge2023}
+L. Zheng, W.-L. Chiang, Y. Sheng, et al.
+\newblock Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena.
+\newblock {\em NeurIPS}, 2023.
+
+\bibitem{llmasjudge2025}
+J. Gu et al.
+\newblock A Survey on LLM-as-a-Judge.
+\newblock {\em arXiv:2411.15594}, 2024.
+
+\bibitem{llmflation2024}
+M. Andreessen and team.
+\newblock LLMflation: LLM Inference Cost is Going Down Fast.
+\newblock {\em a16z}, November 2024.
+
+\bibitem{llmpricing2025}
+A. Shah.
+\newblock Navigating the LLM Cost Maze: A Q2 2025 Pricing and Limits Analysis.
+\newblock Technical report, April 2025.
+
+\bibitem{metr2025}
+METR.
+\newblock Reward Hacking in Frontier Models.
+\newblock Evaluation report, 2025.
+
+\bibitem{multiagentjudge2025}
+H. Chen et al.
+\newblock Multi-Agent-as-Judge: Aligning LLM-Agent-Based Automated Evaluation with Multi-Dimensional Human Evaluation.
+\newblock {\em arXiv:2507.21028}, 2025.
+
+\bibitem{swebench2024}
+C. E. Jimenez, J. Yang, A. Wettig, et al.
+\newblock SWE-bench: Can Language Models Resolve Real-world Github Issues?
+\newblock {\em ICLR}, 2024.
+
+\bibitem{swebenchinfra2025}
+Nebius.
+\newblock Behind SWE-rebench: Infrastructure to Collect Massive Datasets of SWE Tasks and Evaluate Agents at Scale.
+\newblock Blog post, November 2025.
+
+\bibitem{swebenchpro2025}
+X. Deng, et al.
+\newblock SWE-Bench Pro: Can AI Agents Solve Long-Horizon Software Engineering Tasks?
+\newblock {\em arXiv:2509.16941}, November 2025.
+
+
+\bibitem{aeval2026}
+Tejas Singh Anand et al.
+``AEVAL: From Anecdotal to Deterministic Testing for Agentic Skill Workflows.''
+arXiv:2607.16345, 2026. ICML 2026.
+
+\bibitem{clawswe2026}
+Mengyu Zheng et al.
+``Claw-SWE-Bench: A Benchmark for Evaluating OpenClaw-style Agent Harnesses on Coding Tasks.''
+arXiv:2606.12344, 2026.
+
+\bibitem{glide2026}
+Grégoire Martinon et al.
+``Industrializing Prediction-Powered Inference: The GLIDE Library for Reliable GenAI and Agentic Systems Evaluation.''
+arXiv:2605.31278, 2026. ICML 2026.
+
+\bibitem{harnessdiverge2026}
+Haiwen Yi and Xinyuan Song.
+``Measuring Harness-Induced Belief Divergence in Multi-Step LLM Agents.''
+arXiv:2607.04528, 2026.
+
+\bibitem{jade2026}
+Lanbo Lin et al.
+``JADE: Expert-Grounded Dynamic Evaluation for Open-Ended Professional Tasks.''
+arXiv:2602.06486, 2026. ICML 2026.
+
+\bibitem{judgerubric2026}
+Yangda Peng et al.
+``Can LLM-as-a-Judge Reliably Verify Rubrics in Agentic Scenarios?.''
+arXiv:2606.29920, 2026. EMNLP 2026.
+
+\bibitem{modelharness2026}
+Harsh Raj et al.
+``Model or Harness? An Interaction-Centric Taxonomy for Localizing Agent Failures.''
+arXiv:2607.28802, 2026.
+
+\bibitem{uniace2026}
+Pengyu Zhu et al.
+``UniACE: A Unified Framework for Evaluating LLM Agentic Capabilities.''
+arXiv:2605.27898, 2026.
+
+\bibitem{wildclaw2026}
+Shuangrui Ding et al.
+``WildClawBench: A Benchmark for Real-World, Long-Horizon Agent Evaluation.''
+arXiv:2605.10912, 2026.
+
+\bibitem{silentfail2026}
+Wei Wu.
+``When Errors Become Narratives: A Longitudinal Taxonomy of Silent Failures in a Production LLM Agent Runtime.''
+arXiv:2606.14589, 2026.
+
+\bibitem{conformaleval2026}
+Yuxuan Gao et al.
+``Distribution-Free Uncertainty Quantification for Continuous AI Agent Evaluation.''
+arXiv:2605.19779, 2026. ICML 2026.
+\end{thebibliography}
+% ============================================================
+% Part VI: Synthesis
+% ============================================================

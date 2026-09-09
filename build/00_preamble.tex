@@ -1,0 +1,152 @@
+\documentclass[11pt]{book}
+
+% --------------------
+% Packages (minimal, disciplined)
+% --------------------
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{amsthm}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{mathtools}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{pmboxdraw}  % for box-drawing characters
+\usepackage[utf8]{inputenc}
+
+% --------------------
+% Typography
+%   Text  : XCharter (Charter), a screen- and print-legible serif
+%   Math  : newtxmath with the charter option, so math matches the text
+%   Sans  : Inter, used for headings and \textsf
+% --------------------
+\usepackage[T1]{fontenc}
+\usepackage{XCharter}
+\usepackage[charter,vvarbb,scaled=1.03]{newtxmath}
+\usepackage[scaled=0.96]{inter}
+\usepackage[scaled=0.92]{zi4}          % Inconsolata, matches Charter's colour
+\usepackage[protrusion=true,expansion=true]{microtype}
+% Charter sets wider than Computer Modern, so give TeX a little more room
+% to break lines before it resorts to overfull boxes.
+\emergencystretch=2em
+
+% Verbatim blocks hold ASCII diagrams up to 78 columns. Set them slightly
+% smaller so the widest ones fit the 6.5in measure.
+\usepackage{fancyvrb}
+\fvset{fontsize=\small}
+\makeatletter
+\renewcommand{\verbatim@font}{\ttfamily}   % respect the ambient size
+\makeatother
+
+% Charter's digits are wider than Computer Modern's, so the default
+% table-of-contents page-number box overflows on three-digit pages.
+\makeatletter
+\renewcommand{\@pnumwidth}{1.85em}
+\renewcommand{\@tocrmarg}{3.0em}
+\makeatother
+
+% Math symbols
+\DeclareUnicodeCharacter{2212}{$-$}
+\DeclareUnicodeCharacter{2248}{$\approx$}
+\DeclareUnicodeCharacter{2264}{$\leq$}
+\DeclareUnicodeCharacter{2265}{$\geq$}
+\DeclareUnicodeCharacter{00D7}{$\times$}
+\DeclareUnicodeCharacter{2260}{$\neq$}
+\DeclareUnicodeCharacter{221E}{$\infty$}
+\DeclareUnicodeCharacter{03B1}{$\alpha$}
+\DeclareUnicodeCharacter{03B2}{$\beta$}
+\DeclareUnicodeCharacter{03BB}{$\lambda$}
+\DeclareUnicodeCharacter{03C3}{$\sigma$}
+\DeclareUnicodeCharacter{03C0}{$\pi$}
+
+% Arrows
+\DeclareUnicodeCharacter{2192}{$\rightarrow$}
+\DeclareUnicodeCharacter{2190}{$\leftarrow$}
+\DeclareUnicodeCharacter{2194}{$\leftrightarrow$}
+\DeclareUnicodeCharacter{21D2}{$\Rightarrow$}
+
+% Dashes and punctuation
+\DeclareUnicodeCharacter{2013}{--}
+\DeclareUnicodeCharacter{2014}{---}
+\DeclareUnicodeCharacter{2026}{...}
+\DeclareUnicodeCharacter{2018}{`}
+\DeclareUnicodeCharacter{2019}{'}
+\DeclareUnicodeCharacter{201C}{``}
+\DeclareUnicodeCharacter{201D}{''}
+
+% Box drawing (just use lines)
+\DeclareUnicodeCharacter{2500}{-}
+\DeclareUnicodeCharacter{2502}{|}
+\DeclareUnicodeCharacter{251C}{|}
+\DeclareUnicodeCharacter{2514}{+}
+\DeclareUnicodeCharacter{250C}{+}
+\DeclareUnicodeCharacter{2524}{|}
+\DeclareUnicodeCharacter{252C}{+}
+\DeclareUnicodeCharacter{2534}{+}
+\DeclareUnicodeCharacter{253C}{+}
+\DeclareUnicodeCharacter{2518}{+}
+\DeclareUnicodeCharacter{2510}{+}
+\DeclareUnicodeCharacter{25BA}{>}
+\DeclareUnicodeCharacter{25B6}{>}
+
+\DeclareUnicodeCharacter{221A}{$\sqrt{}$}
+\DeclareUnicodeCharacter{2229}{$\cap$}
+\DeclareUnicodeCharacter{2286}{$\subseteq$}
+\DeclareUnicodeCharacter{2287}{$\supseteq$}
+\DeclareUnicodeCharacter{25BC}{$\blacktriangledown$}
+\DeclareUnicodeCharacter{03BC}{$\mu$}
+\DeclareUnicodeCharacter{2713}{$\checkmark$}
+
+\DeclareUnicodeCharacter{25C4}{$\blacktriangleleft$}
+
+% And add this package for tikzpicture:
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+% --------------------
+% Formatting discipline
+% --------------------
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\setlist[itemize]{leftmargin=1.5em}
+\setlist[enumerate]{leftmargin=1.5em}
+
+% --------------------
+% Theorem environments
+% --------------------
+\newtheorem{definition}{Definition}[chapter]
+\newtheorem{lemma}{Lemma}[chapter]
+\newtheorem{theorem}{Theorem}[chapter]
+\newtheorem{proposition}{Proposition}[chapter]
+\newtheorem{claim}{Claim}[chapter]
+
+% --------------------
+% Custom paragraph headers (Eva-style)
+% --------------------
+\newcommand{\problem}{\paragraph{Problem.}}
+\newcommand{\model}{\paragraph{Model.}}
+\newcommand{\mechanism}{\paragraph{Mechanism.}}
+\newcommand{\consequence}{\paragraph{Consequence.}}
+\newcommand{\evaluation}{\paragraph{Evaluation Hook.}}
+
+% --------------------
+% Title
+% --------------------
+\title{\textbf{Agent Algorithmics}\\
+\vspace{0.5em}
+\large Principles for Cost, Reliability, and Safety in Tool-Using AI Systems}
+
+\author{Madhava Gaikwad}
+\date{\today}
+
+\begin{document}
+
+\frontmatter
+\maketitle
+
+% --------------------
+% Front matter
+% --------------------
+

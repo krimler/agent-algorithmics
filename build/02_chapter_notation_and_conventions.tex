@@ -1,0 +1,113 @@
+\chapter*{Notation and Conventions}
+\addcontentsline{toc}{chapter}{Notation and Conventions}
+
+You can skip this chapter and come back when a symbol surprises you. It is here
+so that when Chapter~\ref{ch:gates} writes $B_t - R_t$ without comment, you know
+what both terms mean and why the subtraction matters.
+
+\section*{Time and Execution}
+
+Time is discrete, indexed $t = 1, 2, \ldots$. An agent runs in steps, and at
+each step it observes, decides, and possibly acts. Wall-clock time appears
+separately when latency is the subject; until then, a ``step'' is one turn
+through that loop.
+
+\section*{State, Observation, and History}
+
+\begin{itemize}
+\item $S_t$ denotes the environment state at time $t$, which the agent generally cannot see.
+\item $o_t$ denotes what the agent actually observes at time $t$.
+\item $H_t = (o_1, a_1, \ldots, o_t)$ denotes the execution history through time $t$.
+\end{itemize}
+
+The distinction between $S_t$ and $o_t$ does real work in this book. Agents act
+on $H_t$, a lossy and often stale record, while consequences land on $S_t$.
+
+\section*{Actions and Policies}
+
+\begin{itemize}
+\item $a_t \in \mathcal{A}$ denotes the action taken at time $t$.
+\item $\pi(\cdot \mid H_t)$ denotes the policy, mapping histories to actions.
+\end{itemize}
+
+Policies may be deterministic or stochastic, and may carry internal state of
+their own (a budget tracker, a memory index, a set of open commitments).
+
+\section*{Cost and Budgets}
+
+\begin{itemize}
+\item $c(e_t)$ denotes cost of event $e_t$.
+\item $C(\tau)$ denotes total cost accumulated over a trace $\tau$.
+\item $B_t$ denotes budget remaining at time $t$.
+\item $R_t$ denotes budget \emph{reserved} for work the agent has not done yet but must.
+\item $\hat{R}_t$ denotes the \emph{estimated} cost of completing the task from the
+current state. It is an estimate, so it carries a distribution rather than a single number.
+\item $\Delta_t = B_t - \hat{R}_t$ denotes \emph{slack}, the budget available after
+setting aside what finishing is expected to cost.
+\end{itemize}
+
+Cost covers tokens, latency, external resource consumption, and the expected
+cost of failure. Budgets are hard constraints unless a passage says otherwise.
+$R_t$ is the term that separates an agent which finishes from one that runs out
+of money three steps from the answer.
+
+\section*{Traces}
+
+A trace $\tau = \langle e_1, \ldots, e_T \rangle$ is the sequence of execution
+events, namely observations, decisions, actions, gate outcomes, commits, and aborts.
+
+Correctness, cost, and alignment are properties of traces. A single output can
+look impeccable in a trace that violated an invariant four steps earlier, which
+is why Chapter~\ref{ch:traces} treats the trace as the unit of evaluation.
+
+\section*{Gates and Control Decisions}
+
+A \emph{gate} is a control decision applied before commitment. Its outcomes are
+\[
+\{\textsc{Execute}, \textsc{Verify}, \textsc{Abstain}, \textsc{Refuse}\}.
+\]
+
+Gates read risk estimates, budgets, policies, and evidence. Chapter~\ref{ch:gates}
+derives the thresholds rather than asserting them.
+
+\section*{Speculation and Commitment}
+
+\begin{itemize}
+\item \emph{Speculation} denotes tentative execution whose results may be thrown away.
+\item \emph{Commitment} denotes the moment results become irreversible and externally visible.
+\end{itemize}
+
+Speculative work is assumed abortable. Chapter~\ref{ch:speculation} spends
+considerable effort on how often that assumption is false in practice, including
+the case where an aborted branch still influences the model through retained
+cache state.
+
+\section*{Invariants and Policies}
+
+\begin{itemize}
+\item An \emph{invariant} must hold at every step of execution.
+\item A \emph{policy} is a predicate constraining which actions are admissible.
+\end{itemize}
+
+Breaking an invariant counts as system failure even when the task succeeded.
+A system that refunds the right customer by writing directly to the ledger has
+still failed.
+
+\section*{Conventions}
+
+\begin{itemize}
+\item Boldface marks defined terms on first use, and little else.
+\item Probabilities and expectations condition on the agent's available
+information unless stated otherwise.
+\item Dollar figures and per-token prices are illustrative. Absolute prices move
+fast; the \emph{ratios} between model tiers have been stable for years, and the
+arguments in this book depend only on the ratios.
+\item Examples are illustrative rather than exhaustive.
+\end{itemize}
+
+\tableofcontents
+
+% ============================================================
+% Part I: Foundations
+% ============================================================
+\mainmatter

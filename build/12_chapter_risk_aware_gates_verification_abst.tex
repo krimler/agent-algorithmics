@@ -1,0 +1,998 @@
+\chapter{Risk-Aware Gates: Verification, Abstention, Refusal}
+\label{ch:gates}
+
+A gate is the last moment at which a bad action is still cheap.
+
+Everything before it is proposal, and proposals are free. Everything after it is
+consequence, and consequences are billed at whatever the world charges. An agent
+without gates has no such moment, generation flows directly into side effects,
+so the only defense left is that the model happens to be right. It usually is.
+The interesting question is what happens the rest of the time.
+
+This chapter develops the theory and algorithms of gates. We formalize the four gate outcomes (execute, verify, abstain, refuse), derive threshold conditions for each, present algorithms for gate decisions, and analyze the cost-benefit tradeoffs that determine optimal gate policies. The treatment draws from decision theory, classification with rejection, and systems verification, unifying disparate traditions into a coherent framework for agent control.
+
+\section{The Gate Abstraction}
+
+A gate is a function that maps an action and context to a decision
+\[
+\text{Gate}: (\text{Action}, \text{Context}) \rightarrow \{\textsc{Execute}, \textsc{Verify}, \textsc{Abstain}, \textsc{Refuse}\}
+\]
+
+To be operationally meaningful, a gate must satisfy two properties.
+
+\textbf{Property 1 (Commit separation).} The system must distinguish \emph{proposal} from \emph{commit}. The agent may propose actions freely, but only the gate can authorize commitment. This ensures that ``creative generation'' cannot directly produce side effects.
+
+\textbf{Property 2 (Cost grounding).} Gate decisions must be tunable through
+explicit costs, namely error costs, verification costs, delay costs, escalation costs.
+A gate whose threshold cannot be moved by changing those numbers is an opinionated
+filter wearing a control mechanism's clothes. You can tell the difference by
+asking what would have to change for the gate to decide otherwise. If the answer
+is ``someone edits the prompt,'' it is not a gate.
+
+The four outcomes have distinct semantics, such as \textbf{\textsc{Execute}}: Commit the action immediately. The gate has determined that risk is acceptable and verification is unnecessary. This is the default outcome when confidence is high and stakes are low.
+
+\textbf{\textsc{Verify}}: Run additional checks before committing. Verification consumes resources (time, tokens, money) but reduces error probability. The gate has determined that current confidence is insufficient but the action is likely acceptable after verification.
+
+\textbf{\textsc{Abstain}}: Defer. Decline to execute while leaving the door open,
+which is the right outcome when information is thin, the request is ambiguous, or
+a human should weigh in. The agent can ask a clarifying question, gather evidence,
+or escalate.
+
+Abstention is the outcome teams implement last and need most. It is also the one
+agents are worst at reaching on their own, including evaluated specifically on whether they
+know when \emph{not} to act under ambiguity, conflicting instructions, and
+missing preconditions, agents largely do not \cite{agentabstain2026}. That result
+is the argument for deriving this decision outside the model.
+
+\textbf{\textsc{Refuse}}: Reject the action permanently. The gate has determined that the action should not execute under any circumstances, it violates policy, exceeds capability bounds, or poses unacceptable risk. Refusal is not negotiable; additional evidence or verification cannot change it.
+
+\paragraph{Action types and side effects.}
+In practice, the gate should reason over an action type taxonomy because costs and verification methods differ by type. For example.
+\begin{itemize}
+\item \textbf{Read-only actions.} Retrieval, summarization, report generation. Main cost is correctness and confidentiality.
+\item \textbf{Write actions.} Database updates, ticket creation, notification dispatch. Main cost is irreversible side effects.
+\item \textbf{Privileged actions.} Credential use, access control changes, system commands. Main cost is security impact.
+\end{itemize}
+The same confidence value $p$ should not map to the same control outcome across these types; the cost ratio changes.
+
+\paragraph{Context features.}
+Let $x$ denote the context provided to the gate. Operationally, $x$ includes.
+\begin{itemize}
+\item \textbf{User intent signals.} Prompt, recent turns, explicit constraints.
+\item \textbf{System state.} Environment, permissions, tool availability, rate limits.
+\item \textbf{Action metadata.} Action type, target resource, estimated blast radius.
+\item \textbf{Uncertainty signals.} Model log-prob proxies, self-consistency scores, verifier disagreement.
+\end{itemize}
+A gate that does not ingest action metadata and system state will be brittle. It will treat high-risk and low-risk actions similarly.
+
+\subsection{Gate Placement}
+
+Gates can be placed at multiple points in the execution pipeline. \textbf{Pre-generation gate.} Before the agent generates a proposed action. Filters inputs that should not be processed at all. Example. Refusing to process a request that violates content policy.
+
+\textbf{Post-generation gate.} After the agent proposes an action but before execution. Evaluates the specific proposal against quality and safety criteria. Example. Verifying that a generated SQL query is safe before execution.
+
+\textbf{Pre-commit gate.} After speculative execution but before results become permanent. Evaluates actual results against acceptance criteria. Example. Reviewing generated code against test results before merging.
+
+\textbf{Post-commit gate.} After commitment, for monitoring and potential rollback. Detects problems that escaped earlier gates. Example. Monitoring API responses for error patterns after deployment.
+
+Each placement has different information available.
+
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+Gate position & User input & Proposed action & Execution result & Commit status \\
+\midrule
+Pre-generation & \checkmark &, &, &, \\
+Post-generation & \checkmark & \checkmark &, &, \\
+Pre-commit & \checkmark & \checkmark & \checkmark &, \\
+Post-commit & \checkmark & \checkmark & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Earlier gates prevent wasted computation; later gates catch errors that escaped earlier checks. The tradeoff is precision versus cost. Pre-generation gates operate on ambiguous inputs; post-commit gates operate on concrete outcomes but only after resources are spent.
+
+\paragraph{Placement implication: what can be proven.}
+Certain guarantees are only meaningful at certain placements.
+\begin{itemize}
+\item A \textbf{pre-generation} gate can enforce \emph{policy invariants on inputs}, but cannot validate specific tool calls because the action is not yet formed.
+\item A \textbf{post-generation} gate can enforce \emph{static correctness} (schema, syntax, constraints) on the concrete proposal.
+\item A \textbf{pre-commit} gate can enforce \emph{semantic correctness} against actual outcomes (tests, dry-runs).
+\item A \textbf{post-commit} gate can enforce \emph{operational correctness} (monitoring, rollback), but only with compensating actions.
+\end{itemize}
+
+\subsection{Gate Costs}
+
+Each gate outcome carries costs.
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Outcome & Direct cost & Opportunity cost \\
+\midrule
+\textsc{Execute} & Action execution cost & Error cost if wrong \\
+\textsc{Verify} & Verification cost & Delay cost \\
+\textsc{Abstain} & Escalation cost & Incomplete task cost \\
+\textsc{Refuse} & Zero & Lost value if action was valid \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The goal of gate design is to minimize total expected cost, balancing the risk of errors against the cost of prevention.
+
+\paragraph{Cost modeling in practice.}
+Costs are rarely scalar in real systems. A useful operational model decomposes
+\[
+c_e = c_{\text{impact}} \cdot c_{\text{recoverability}} \cdot c_{\text{blast-radius}},
+\]
+where impact is the severity of a wrong action, recoverability reflects rollback difficulty, and blast radius reflects scope (single user vs fleet). This decomposition is how systems teams assign stricter gates to privileged actions.
+
+\section{Threshold Derivation}
+
+Gate decisions reduce to threshold comparisons. We derive optimal thresholds from decision theory, connecting to the classical literature on classification with rejection \cite{chow1970optimum, cortes2016learning}.
+
+\subsection{The Binary Gate}
+
+Consider first a simplified binary gate, namely execute or refuse. Let $p$ be the probability that an action is correct (safe, appropriate, effective). Let $c_e$ be the cost of executing a bad action and $c_r$ be the cost of refusing a good action. The expected cost of execution is
+\[
+\mathbb{E}[\text{cost}|\textsc{Execute}] = (1-p) \cdot c_e
+\]
+The expected cost of refusal is
+\[
+\mathbb{E}[\text{cost}|\textsc{Refuse}] = p \cdot c_r
+\]
+Execute when $\mathbb{E}[\text{cost}|\textsc{Execute}] < \mathbb{E}[\text{cost}|\textsc{Refuse}]$
+\[
+(1-p) \cdot c_e < p \cdot c_r \implies p > \frac{c_e}{c_e + c_r}
+\]
+
+This is Chow's rule \cite{chow1970optimum}: execute when confidence exceeds the threshold $\tau = c_e/(c_e + c_r)$. The threshold depends only on the cost ratio, not on absolute costs.
+
+\textbf{Example.} If executing a bad action costs \$100 and refusing a good action costs \$10, the threshold is $\tau = 100/(100+10) \approx 0.91$. Execute only when 91\% confident the action is correct.
+
+\paragraph{Engineering interpretation.}
+Two points matter operationally.
+\begin{itemize}
+\item If $c_e \gg c_r$, then $\tau \rightarrow 1$. The system becomes conservative, which is correct for destructive actions.
+\item If $c_r \gg c_e$, then $\tau \rightarrow 0$. The system executes almost always, which is correct for low-stakes suggestions.
+\end{itemize}
+This is why ``one global threshold'' is wrong. Different action classes imply different cost ratios.
+
+\subsection{Adding Verification}
+
+Verification adds a third option. Let $c_v$ be the verification cost (always paid) and let $\alpha$ be the probability that verification correctly identifies bad actions (the verification accuracy). After verification, we execute only if verified safe.
+
+The expected cost of verification is
+\[
+\mathbb{E}[\text{cost}|\textsc{Verify}] = c_v + p \cdot 0 + (1-p)(1-\alpha) \cdot c_e
+\]
+The $(1-p)(1-\alpha)$ term captures bad actions that escape verification. Verification is preferred to immediate execution when
+\[
+c_v + (1-p)(1-\alpha) \cdot c_e < (1-p) \cdot c_e
+\]
+Simplifying
+\[
+c_v < (1-p) \cdot \alpha \cdot c_e
+\]
+
+Verification is worthwhile when its cost is less than the expected error reduction. This yields a verification region where confidence is moderate, high enough that outright refusal wastes value, low enough that immediate execution is risky.
+
+\paragraph{Verification versus refusal.}
+Verification must also beat refusal. If refusing a good action costs $c_r$, then
+\[
+\mathbb{E}[\text{cost}|\textsc{Verify}] < \mathbb{E}[\text{cost}|\textsc{Refuse}]
+\quad \Longrightarrow \quad
+c_v + (1-p)(1-\alpha)c_e < p c_r.
+\]
+This inequality defines the lower edge of the verification region. Together with
+\[
+c_v < (1-p)\alpha c_e
+\]
+(which defines when verification beats immediate execution), we obtain a bounded interval of $p$ where verification is optimal.
+
+\paragraph{Accuracy parameterization.}
+The symbol $\alpha$ hides two distinct error modes, separated below.
+\begin{itemize}
+\item verifier \textbf{false negatives}, bad actions that pass verification (drives residual risk),
+\item verifier \textbf{false positives}, good actions that fail verification (drives unnecessary refusal or abstention).
+\end{itemize}
+If verification is automated (lint, schema, tests), both rates can often be measured and improved. If verification is model-based, both rates drift and require periodic recalibration.
+
+\subsection{Adding Abstention}
+
+Abstention (deferral, escalation) costs $c_a$, which may include human review cost, delay cost, or the cost of incomplete task execution. Unlike refusal, abstention may eventually lead to execution after additional information is gathered.
+
+The optimal policy partitions the confidence space into four regions.
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Confidence region & Optimal decision \\
+\midrule
+$p < \tau_{\text{refuse}}$ & \textsc{Refuse} \\
+$\tau_{\text{refuse}} \leq p < \tau_{\text{abstain}}$ & \textsc{Abstain} \\
+$\tau_{\text{abstain}} \leq p < \tau_{\text{verify}}$ & \textsc{Verify} \\
+$p \geq \tau_{\text{verify}}$ & \textsc{Execute} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The thresholds depend on the cost structure
+\begin{align*}
+\tau_{\text{refuse}} &= \frac{c_e}{c_e + c_r + c_a'} \\
+\tau_{\text{verify}} &= 1 - \frac{c_v}{\alpha \cdot c_e}
+\end{align*}
+where $c_a'$ is the effective abstention cost accounting for eventual resolution.
+
+\paragraph{Making $c_a'$ explicit.}
+A useful operational model is
+\[
+c_a' = c_a + \Pr(\text{eventual failure} \mid \textsc{Abstain}) \cdot c_r
+      + \Pr(\text{eventual wrong commit} \mid \textsc{Abstain}) \cdot c_e.
+\]
+This reflects that abstention is not ``free safety'': it shifts work into escalation queues and may still end in a wrong decision, especially if humans rubber-stamp.
+
+\paragraph{Abstention is not a verifier.}
+Verification reduces error probability by checking the proposal. Abstention reduces error probability by delaying commitment until more information exists. These are different mechanisms. Confusing them leads to poor designs such as ``always ask the user to confirm'' (which becomes unusable) or ``always run a model judge'' (which becomes expensive and still brittle).
+
+\subsection{Calibration Requirements}
+
+These thresholds require calibrated confidence estimates. A confidence of 0.9 should mean the action is correct 90\% of the time. Modern LLMs are often overconfident, such as they report high confidence even when wrong \cite{guo2017calibration}.
+
+Calibration techniques include.
+\begin{itemize}
+\item Temperature scaling. Adjust output logits by a learned scalar.
+\item Platt scaling. Fit a sigmoid to map logits to calibrated probabilities.
+\item Verbalized confidence. Ask the model to state its confidence explicitly.
+\item Consistency checking. Sample multiple responses and measure agreement.
+\end{itemize}
+
+Post-trained models exhibit systematic overconfidence that temperature scaling
+does not fully correct \cite{tian2023just}. Combining verbalized confidence with
+consistency checking gives more reliable estimates than either alone.
+
+One negative result is worth internalizing before you build on any of this.
+Entropy-based uncertainty. The most common signal in practice, because it is
+free, is \emph{insufficient} for safe selective prediction. It identifies
+low-confidence cases without identifying the high-risk ones, and the two sets
+overlap less than you would hope \cite{entropyinsuff2026}. A gate that abstains
+on high entropy will abstain on genuinely ambiguous but harmless queries while
+executing confident, wrong, expensive ones.
+
+The practical reading is that risk and uncertainty are different quantities. The
+gate needs an estimate of $P(\text{error})$ \emph{and} a cost model over what
+that error does. Chapter~\ref{ch:action-selection} needs the same calibrated
+quantity for cascade escalation, and a survey of uncertainty quantification for
+agents specifically \cite{uqagents2026} is a reasonable entry point to the
+methods.
+
+\paragraph{Operational calibration requirement.}
+The gate needs \emph{calibration conditional on action class}. A model may be well-calibrated on QA but poorly calibrated on tool-use. Practically, maintain separate calibration maps (or separate $p$-predictors) for at least
+\[
+\{\text{read-only},\ \text{write},\ \text{privileged}\},
+\]
+because the base error rates and failure modes differ.
+
+\paragraph{How to form $p$ without introspective claims.}
+A common failure is to use ``model says confidence is 0.93'' as $p$. Prefer predictors derived from observable signals.
+\begin{itemize}
+\item consistency across $k$ samples (agreement score),
+\item constraint satisfaction rates (schema validity, type checks),
+\item historical error rates per tool and per action template,
+\item verifier disagreement (guard model vs generator).
+\end{itemize}
+Treat verbalized confidence as one feature, not the estimate itself.
+\section{Verification Strategies}
+
+When the gate selects \textsc{Verify}, what verification should run? The choice depends on the action type, available resources, and error characteristics.
+
+\subsection{Verification Taxonomy}
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Verification type & Mechanism & Coverage \\
+\midrule
+Syntactic & Pattern matching, parsing & Format errors \\
+Semantic & Constraint checking & Logic errors \\
+Execution & Sandbox testing & Runtime errors \\
+Model-based & LLM review & Subjective errors \\
+Human & Expert review & All error types \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Syntactic verification catches malformed outputs, including JSON that doesn't parse, SQL that doesn't compile, code with syntax errors. It is fast (milliseconds) and cheap (no API calls) but catches only surface errors.
+
+Semantic verification checks constraints. Does this SQL query touch only permitted tables? Does this email address exist? Does this function call use valid parameters? It requires domain knowledge encoded as rules or schemas.
+
+Execution verification runs the action in a sandbox and observes results. Does the code pass tests? Does the API call return valid data? It catches runtime errors but requires safe execution environments.
+
+Model-based verification uses an LLM to evaluate outputs. WildGuard \cite{han2024wildguard} achieves 94.7\% F1 on response harmfulness detection, reducing jailbreak success from 79.8\% to 2.4\% when deployed as a filter. LlamaGuard provides multi-turn safety classification across 14 risk categories. These models are lightweight (7B parameters) and fast (sub-second latency).
+
+Human verification is the gold standard but expensive and slow. It should be reserved for high-stakes decisions where automated verification is insufficient.
+
+\paragraph{Verifier selection is part of the gate.}
+``Verify'' is not a single action. The gate must select a verifier policy
+\[
+V = \text{SelectVerifier}(a, x),
+\]
+and then execute $V(a, x)$ to obtain evidence $e$. In practice, $V$ is chosen based on.
+\begin{itemize}
+\item \textbf{Failure mode.} Syntax vs safety vs correctness.
+\item \textbf{Risk.} Higher $c_e$ justifies stronger verification.
+\item \textbf{Budget.} Rate limits and latency constraints.
+\item \textbf{Tool semantics.} Some tools support dry-runs; others do not.
+\end{itemize}
+
+\subsection{Verification Composition}
+
+Multiple verification stages can be composed.
+
+\begin{enumerate}
+\item Fast syntactic checks filter obvious errors (milliseconds).
+\item Semantic constraint checks filter policy violations (tens of milliseconds).
+\item Model-based safety checks filter harmful content (hundreds of milliseconds).
+\item Execution tests verify functional correctness (seconds).
+\item Human review validates critical decisions (minutes to hours).
+\end{enumerate}
+
+Early stages should have high recall (catch most errors) even at the cost of precision. Later stages refine the decision with higher precision. This cascade minimizes expected verification cost while maintaining safety.
+
+\paragraph{Cascade rule: fail fast, then get expensive.}
+A practical cascade obeys two rules.
+\begin{itemize}
+\item \textbf{Hard failures early.} Parsing errors, schema violations, missing parameters.
+\item \textbf{Soft failures later.} Suspicious intent, borderline safety, ambiguous semantics.
+\end{itemize}
+This ordering matters because it reduces wasted work. Running an LLM safety classifier on invalid JSON is pure loss.
+
+\subsection{When the Verifier Is Wrong}
+
+Everything above treats verification as a source of truth. It is not. A verifier
+is a classifier with its own error rates, and once you admit that, the arithmetic
+of verification changes.
+
+Consider the verify-repair loop that agents run constantly, namely propose, check, fix
+what the check flags, re-check. With a perfect verifier this converges. With a
+noisy verifier it can \emph{diverge}, because a false positive sends the agent to
+repair something that was already correct, and repairs damage working outputs at
+a nonzero rate. Systematic study of noisy verify-repair loops shows this is a real
+regime, not a corner case, and that a robust stopping rule matters more than a
+better repairer \cite{verifyrepair2026}.
+
+The decision rule from Chapter~\ref{ch:math} therefore needs a term. Naively, verification pays when
+\[
+c_v < \alpha \cdot c_e,
+\]
+with $\alpha$ the verification accuracy defined above, meaning the fraction of bad
+actions the verifier catches. Accounting for verifier error gives
+\[
+c_v \;+\; \underbrace{\phi \cdot c_{\text{repair-damage}}}_{\text{false positives}} \;<\; \alpha \cdot c_e,
+\]
+where $\phi$ is the verifier's false-positive rate, meaning the fraction of correct
+outputs it wrongly flags. Note that $\phi$ is distinct from the accuracy $\alpha$
+used earlier in this chapter. A verifier can be accurate at catching bad actions
+and still flag good ones often, and it is $\phi$ that drives the repair loop.
+When $\phi$ is high and the repair step is destructive, verification has negative value, the loop actively
+degrades output. This is the analytic reason for a rule that experienced teams
+arrive at by instinct. Cap repair iterations, and prefer verifiers that abstain
+over verifiers that guess.
+
+A related caution applies to model-based verification specifically. Rubric-based
+scoring with an LLM judge, which is the usual implementation, has been shown to be
+unreliable in agentic settings where the thing being judged is a trajectory rather
+than an answer \cite{judgerubric2026}. Chapter~\ref{ch:evaluation} treats this at
+length; here it is enough to note that a model-based verifier inherits every
+failure mode of the model it verifies, including correlated ones. A generator and
+a verifier from the same family will agree on the same mistakes.
+
+\subsection{Verifying Before Committing}
+
+The ordering matters as much as the checks. Verification that runs after
+commitment is monitoring, which is valuable and is a different thing.
+
+Self-auditing places the check between reasoning and action, testing whether the
+agent's stated justification actually supports the action it is about to take
+\cite{verifycommit2026}. This catches a failure that output-level checks miss
+entirely. Coherent reasoning that violates an evidential constraint, producing a
+well-formed action justified by a belief the agent has no support for.
+
+Structurally, this is the prepare phase of two-phase commit
+(Chapter~\ref{ch:speculation}) with the agent's own reasoning as the participant
+being polled. The gate is the commit point, and the verifier's evidence is the
+vote.
+
+\paragraph{A concrete gate decision algorithm.}
+A minimal implementable gate can be written as.
+\begin{enumerate}
+\item Compute action class $t \in \{\text{read}, \text{write}, \text{privileged}\}$ and risk multiplier $m(t)$.
+\item Compute confidence estimate $p$ and calibrated risk cost $c_e \leftarrow m(t)\cdot c_e$.
+\item If policy-invariant violated $\Rightarrow$ \textsc{Refuse}.
+\item Else if $p \ge \tau_{\text{execute}}(t)$ and action is reversible $\Rightarrow$ \textsc{Execute}.
+\item Else run cascade $V_1, V_2, \ldots$ until either.
+  \begin{itemize}
+  \item a verifier returns a hard fail $\Rightarrow$ \textsc{Refuse} (or \textsc{Abstain} if human escalation is required),
+  \item verifiers produce sufficient evidence $\Rightarrow$ \textsc{Execute},
+  \item budget or time is exhausted $\Rightarrow$ \textsc{Abstain} (or \textsc{Refuse} in fail-closed systems).
+  \end{itemize}
+\end{enumerate}
+Nothing here is sophisticated. It is the baseline that avoids the ``generate then execute'' failure, and a surprising number of production systems do not clear it.
+
+\subsection{Verification Cost-Benefit}
+
+The value of verification depends on its accuracy $\alpha$ and the base error rate $(1-p)$
+\[
+\text{Value of verification} = (1-p) \cdot \alpha \cdot c_e - c_v
+\]
+
+Verification is cost-effective when this is positive. For high-confidence actions ($p$ near 1), verification rarely catches errors and adds cost without benefit. For low-confidence actions ($p$ near 0), refusal is cheaper than verification. The sweet spot is moderate confidence where errors are plausible but not certain.
+
+\paragraph{Two operational refinements.}
+\begin{itemize}
+\item \textbf{Nonstationarity.} $(1-p)$ and $\alpha$ drift over time as prompts shift and tools change. The gate must be monitored like any other production component.
+\item \textbf{Asymmetric verification.} Some verifiers mainly reduce $c_e$ (prevent bad commits). Others mainly reduce $c_r$ (prevent unnecessary refusal). For example, a schema validator reduces $c_e$ by preventing invalid execution; a human approval step reduces $c_e$ but may increase $c_r$ by delaying valid actions.
+\end{itemize}
+
+\section{Abstention Theory}
+
+Abstention. The decision to neither execute nor refuse, is understudied in agent systems but well-developed in machine learning as classification with rejection \cite{hendrickx2024survey, wen2024abstention}.
+
+\subsection{When to Abstain}
+
+Abstention is appropriate when.
+\begin{itemize}
+\item \textbf{Information is insufficient.} The query is ambiguous, context is missing, or the task exceeds the agent's knowledge.
+\item \textbf{Stakes exceed capability.} The agent recognizes that the task requires judgment beyond its reliable competence.
+\item \textbf{Human values are at stake.} Decisions with moral, legal, or significant personal consequences should involve human judgment.
+\item \textbf{Conflict exists.} Multiple valid interpretations exist, and the agent cannot determine which the user intends.
+\end{itemize}
+
+SelectLLM \cite{yoshikawa2025selectllm} trains models to recognize their own
+uncertainty and abstain, achieving balanced coverage-utility trade-offs on medical
+and commonsense QA. Abstention benefits from being a trained capability rather than
+a threshold bolted onto a confidence score.
+
+Two lines of recent work extend this. Verifiable reinforcement learning can produce
+\emph{calibrated} abstention together with a useful post-refusal clarification,
+addressing the common complaint that a refusal without a next step is worse than a
+guess \cite{abstainr12026}. And plug-and-play selective prediction, which augments
+a frozen model with a memory of past decisions rather than retraining it, extends
+abstention to open-set tasks where the answer space is not enumerable
+\cite{selectivepred2026}, which is the regime agents actually operate in.
+
+For agents specifically, deferral can be framed at the level of the \emph{action}
+rather than the answer, such as given a sequential decision problem, decide whether this
+step should be handed to a human or a stronger system \cite{redact2026}. That
+framing composes directly with the budget machinery of
+Chapter~\ref{ch:action-selection}, since deferral has a price and competes for the
+same pool.
+
+\paragraph{Ambiguity versus uncertainty.}
+Abstention triggers for two different reasons, set out below.
+\begin{itemize}
+\item \textbf{Epistemic uncertainty.} The system does not know which answer is correct.
+\item \textbf{Intent ambiguity.} Multiple answers could be correct depending on the user's intent.
+\end{itemize}
+The remedy differs. Epistemic uncertainty suggests escalation or retrieval. Intent ambiguity suggests clarification questions. Treating both as ``low confidence'' leads to poor interaction design.
+
+\subsection{Abstention Mechanisms}
+
+Three mechanisms implement abstention. \textbf{Confidence-based routing.} If confidence falls below a threshold, route to human review. This is the simplest mechanism but requires calibrated confidence. The binding constraint is the reviewer. Human oversight has finite capacity, and reviewers are neither perfectly available nor perfectly accurate. An approval gate calibrated without modelling reviewer fatigue will either saturate the queue or be rubber-stamped \cite{oversightcap2026}. Set the escalation threshold against measured reviewer throughput, and treat that throughput as a budget in the sense of Chapter~\ref{ch:budgets}.
+
+\textbf{Explicit uncertainty expression.} Train the model to output ``I don't know'' or ``I'm not sure'' when appropriate. This requires training data with abstention labels and careful balancing to avoid over- or under-abstention.
+
+\textbf{Clarification requests.} Instead of abstaining silently, ask the user for additional information. This maintains engagement while acknowledging limitations. The agent should limit clarification questions to avoid frustrating users.
+
+\paragraph{Clarification policy as an algorithm.}
+A clarification mechanism should be bounded. A simple rule that works in practice.
+\begin{itemize}
+\item ask at most $q_{\max}$ clarification questions (e.g., $q_{\max}=2$),
+\item each question must reduce ambiguity over a fixed set of discrete options (not open-ended),
+\item if ambiguity persists after $q_{\max}$, escalate or refuse depending on risk.
+\end{itemize}
+This prevents the failure mode where the agent becomes a question generator.
+
+\subsection{Over-Abstention and Under-Abstention}
+
+Both failure modes are harmful. \textbf{Over-abstention} (exaggerated safety). The agent refuses helpful actions, frustrating users and reducing utility. OR-Bench \cite{cui2024orbench} contains 80,000 benign prompts that current LLMs incorrectly reject. Over-abstention often results from safety training that penalizes false negatives heavily without balancing false positives.
+
+\textbf{Under-abstention.} The agent executes actions it should have deferred, leading to errors, safety violations, or poor outcomes. Under-abstention is the more dangerous failure mode in high-stakes applications.
+
+The optimal abstention rate depends on the application. Medical diagnosis warrants high abstention; casual conversation warrants low abstention. Gates should be calibrated to the deployment context.
+
+\paragraph{Metrics for abstention quality.}
+Operationally, abstention should be measured with.
+\begin{itemize}
+\item \textbf{coverage.} Fraction of requests answered without abstaining,
+\item \textbf{selective risk.} Error rate on the answered subset,
+\item \textbf{escalation load.} Fraction of requests routed to humans,
+\item \textbf{user friction.} Extra turns caused by abstention or clarification.
+\end{itemize}
+A gate tuned only for safety will over-abstain; a gate tuned only for friction will under-abstain.
+
+\section{Coverage Across a Pipeline}
+
+Everything so far calibrates a single decision. An agent is a pipeline, and
+calibrating each stage independently gives no guarantee about the whole.
+
+The naive repair is a union bound over stages, which is valid and badly
+conservative, widening intervals until abstention swallows the useful cases.
+Pipeline-aware split conformal reduces joint coverage across $K$ stages to a
+single conformal problem on the joint maximum nonconformity score, giving a
+finite-sample distribution-free guarantee that all stages are simultaneously
+covered without paying the Bonferroni penalty \cite{pasc2026}.
+
+For agents the relevant pipeline is planner, tool, critic. Errors compound across
+those stages, which is the same compounding Chapter~\ref{ch:traces} describes
+when it notes that the step where an error surfaces is rarely the step that
+caused it. A joint coverage statement is the uncertainty-quantification
+counterpart of that observation.
+
+The cost is the usual one for conformal methods, namely a calibration set drawn
+from the deployment distribution, with guarantees that degrade as the
+distribution moves.
+
+\section{Refusal Policies}
+
+Refusal is the strongest gate outcome. Permanent rejection regardless of additional evidence. Unlike abstention, refusal cannot be overridden by verification or human escalation. It represents a hard constraint.
+
+\subsection{Refusal Categories}
+
+Gates refuse actions in several categories. \textbf{Policy violations.} Actions that violate explicit rules regardless of context. Content policies, data access restrictions, regulatory requirements. These are non-negotiable.
+
+\textbf{Capability boundaries.} Actions the agent cannot perform reliably. Admitting limitations is better than attempting and failing. The model should refuse rather than hallucinate.
+
+\textbf{Safety hazards.} Actions with unacceptable risk regardless of potential benefit. Physical harm, security exploits, privacy violations.
+
+\textbf{Ethical constraints.} Actions that conflict with values even if technically feasible. Deception, manipulation, discrimination.
+
+\paragraph{Refusal must be auditable.}
+Refusal without explanation is operationally expensive. It creates support tickets and encourages prompt manipulation. But the explanation must be careful.
+\begin{itemize}
+\item it should state the category (policy / capability / safety),
+\item it should not provide instructions that enable circumvention,
+\item it should provide safe alternatives when possible.
+\end{itemize}
+
+\subsection{Refusal Implementation}
+
+Refusal training faces a fundamental tension. Models must learn to refuse harmful requests while remaining helpful for legitimate requests that superficially resemble harmful ones \cite{qi2024alignment}.
+
+Current safety alignment approaches (RLHF, DPO) often produce shallow alignment. The model learns to generate refusal prefixes (``I can't help with that'') without deeply understanding why the request is harmful \cite{qi2025shallow}. This shallow alignment is vulnerable to jailbreaks that bypass the refusal prefix.
+
+Safe RLHF \cite{dai2024safe} decouples helpfulness and harmlessness into separate reward and cost models, optimizing helpfulness subject to safety constraints. This Lagrangian formulation produces more robust refusals but requires careful constraint calibration.
+
+\paragraph{Separation of objectives.}
+A strong engineering pattern is \emph{objective separation.}.
+\begin{itemize}
+\item generator model, including optimized for task completion,
+\item guard model. Optimized for safety classification,
+\item gate. Combines them under explicit costs.
+\end{itemize}
+This prevents the generator from being both advocate and judge of its own output.
+
+\subsection{Refusal Consistency}
+
+Refusals should be consistent. If the agent refuses a request in one phrasing, it should refuse equivalent phrasings. Research shows troubling inconsistencies.
+\begin{itemize}
+\item \textbf{Temporal framing.} Models refuse future-tense harmful requests (57\% safe) but comply with past-tense equivalents (16\% safe) \cite{andriushchenko2025temporal}.
+\item \textbf{Linguistic variation.} Multilingual models show inconsistent refusal across languages.
+\item \textbf{Context manipulation.} Fictional framing, roleplay, and technical jargon can bypass refusals.
+\end{itemize}
+
+Robust refusal requires invariance to surface-level reformulations. The gate should recognize harmful intent regardless of phrasing.
+
+\paragraph{Invariance testing.}
+Operationally, refusal consistency must be tested with paraphrase sets.
+\begin{itemize}
+\item lexical paraphrases (synonyms, reordering),
+\item style paraphrases (roleplay, hypothetical framing),
+\item language paraphrases (translation),
+\item decomposition (splitting a malicious request into steps).
+\end{itemize}
+If the refusal rate varies substantially across these sets, the refusal policy is matching patterns rather than checking invariants, and a determined user will find the phrasing that gets through.
+\section{Human-in-the-Loop Integration}
+
+Gates often route decisions to human operators. This integration must be designed carefully to avoid bottlenecks and ensure meaningful oversight.
+
+\subsection{Escalation Patterns}
+
+\textbf{Synchronous approval.} The agent pauses and waits for human approval before proceeding. This provides maximum control but introduces 0.5--2 second latency per decision. Use for irreversible actions, namely financial transactions, data deletion, system modifications.
+
+\textbf{Asynchronous audit.} The agent executes immediately but logs decisions for later human review. This maintains speed but accepts delayed error detection. Use for reversible actions with audit requirements.
+
+\textbf{Confidence-based routing.} Decisions below a confidence threshold route to humans; others execute automatically. This balances autonomy with oversight. The threshold should be derived from reviewer capacity rather than chosen as a round number, since an escalation rate that exceeds what reviewers can absorb converts oversight into a formality \cite{oversightcap2026}.
+
+\textbf{Exception-based review.} Humans review only anomalies detected by automated monitoring. This scales human attention to the decisions most likely to need it.
+
+\paragraph{Human routing is a gate outcome, not a fallback.}
+If escalation is treated as the place where everything hard goes, the system will fail under load. Escalation must be budgeted as a finite resource and protected by thresholds that respond to queue conditions.
+
+\subsection{Human Review Quality}
+
+Human reviewers are not infallible. Under time pressure, reviewers may rubber-stamp decisions without careful evaluation. Alert fatigue from excessive false positives degrades vigilance.
+
+Effective human review requires.
+\begin{itemize}
+\item Clear decision criteria with examples.
+\item Reasonable queue sizes (reviewers should not be overwhelmed).
+\item Feedback loops connecting review decisions to model improvement.
+\item Audit trails for accountability.
+\end{itemize}
+
+The goal is meaningful oversight, not checkbox compliance.
+
+\paragraph{Feedback should update the gate, not just the model.}
+Human overrides can be used to retrain models, but they should also update.
+\begin{itemize}
+\item calibration maps (reported $p$ vs observed correctness),
+\item cost parameters (actual incident cost vs assumed cost),
+\item verifier policies (which checks caught which failures).
+\end{itemize}
+Otherwise the same classes of failures recur.
+
+\section{Gate Composition}
+
+Real systems compose multiple gates into pipelines. This section analyzes gate interaction effects.
+
+\subsection{Sequential Gate Pipelines}
+
+When gates are arranged in sequence, each gate sees only actions that passed previous gates. This creates dependencies
+
+\[
+P(\text{Execute}) = P(\text{Pass}_1) \cdot P(\text{Pass}_2 | \text{Pass}_1) \cdot \ldots \cdot P(\text{Pass}_n | \text{Pass}_{1..n-1})
+\]
+
+If each gate has a 90\% pass rate for valid actions, a 5-gate pipeline passes only $0.9^5 \approx 59\%$ of valid actions. Gate pipelines should be designed to minimize false refusals while maintaining safety.
+
+\paragraph{Design rule: isolate failure modes.}
+Sequential gates should be as orthogonal as possible. If two gates check the same failure mode (e.g., both are LLM-based safety classifiers), the system pays twice and gains little. Instead, sequence deterministic checks first, then semantic checks, then expensive checks.
+
+\paragraph{Recall budgeting.}
+If the product requires overall valid-action pass rate at least $\rho$, and there are $n$ sequential gates each with valid-action recall $r_i$, then
+\[
+\prod_{i=1}^n r_i \ge \rho.
+\]
+This is how you justify removing redundant gates, such as overall recall collapses multiplicatively.
+
+\subsection{Parallel Gate Evaluation}
+
+Gates can also evaluate in parallel, with the final decision based on consensus or any-reject rules. \textbf{Any-reject (AND).} Execute only if all gates approve. Most conservative; any gate can block execution.
+
+\textbf{Majority vote.} Execute if most gates approve. Balances precision and recall.
+
+\textbf{Any-approve (OR).} Execute if any gate approves. Most permissive; rarely used for safety-critical decisions.
+
+Parallel evaluation adds latency (must wait for slowest gate) but provides defense in depth.
+
+\paragraph{Parallelism trades compute for robustness.}
+Parallel gates are appropriate when.
+\begin{itemize}
+\item a single verifier is known to be brittle (distribution shift),
+\item different verifiers cover different attack surfaces (e.g., jailbreak detection vs PII leakage),
+\item latency can be hidden via speculative execution.
+\end{itemize}
+
+\subsection{Gate Hierarchy}
+
+Gates can be organized hierarchically.
+
+\begin{enumerate}
+\item \textbf{Global gates.} Apply to all actions (content policy, rate limits).
+\item \textbf{Domain gates.} Apply to specific action types (financial transactions, code execution).
+\item \textbf{Instance gates.} Apply to specific actions (this particular query, this particular user).
+\end{enumerate}
+
+Higher-level gates set broad policy; lower-level gates implement context-specific rules. This mirrors access control in traditional systems.
+
+\paragraph{Hierarchy clarifies ownership.}
+Global gates are owned by platform/security teams. Domain gates are owned by product teams. Instance gates are owned by the runtime and may be influenced by user trust level, session state, or incident mode.
+
+\section{Interaction with Other Mechanisms}
+
+Gates interact with budgets (Chapter~\ref{ch:action-selection}), speculation (Chapter~\ref{ch:speculation}), and commit protocols.
+
+\subsection{Gates and Budgets}
+
+Gates that trigger verification consume budget. The verification cost must be accounted in budget planning
+
+\[
+b_{\text{available}} \geq c_{\text{action}} + P(\textsc{Verify}) \cdot c_{\text{verify}} + P(\textsc{Abstain}) \cdot c_{\text{abstain}}
+\]
+
+Budget-constrained systems may reduce verification frequency as budget depletes, trading safety for completion. This is dangerous. Budget pressure should not compromise safety gates.
+
+\paragraph{Safety budgeting rule.}
+Budgets may reduce \emph{performance optimizations} but must not disable \emph{invariants}. A safe design is.
+\begin{itemize}
+\item keep a reserved budget slice for mandatory safety gates,
+\item reduce optional verification (best-effort checks) first,
+\item when budgets are exhausted, abstain or refuse rather than execute unsafely.
+\end{itemize}
+
+\subsection{Gates and Speculation}
+
+Speculative execution (Chapter~\ref{ch:speculation}) interacts with gates at commit time. Actions may execute speculatively but must still pass gates before commitment.
+
+\begin{enumerate}
+\item Speculative execution produces tentative results.
+\item Pre-commit gate evaluates results against criteria.
+\item Gate decision determines whether to commit or abort.
+\end{enumerate}
+
+This allows speculation to proceed optimistically while gates maintain safety. The speculation cost is paid regardless of gate outcome; only the commit decision is gated.
+
+\paragraph{Speculation must not leak side effects.}
+If speculative execution produces observable side effects (emails sent, writes committed), then the gate is not a commit validator; it becomes a post-hoc monitor. For speculation to preserve semantics, speculative effects must be isolated (transactions, sandboxes, staging resources).
+
+\subsection{Gates as Commit Validators}
+
+Gates implement the validation phase of two-phase commit (Chapter~\ref{ch:speculation}). The gate is the decision point between tentative execution and permanent commitment. This framing unifies gate theory with transaction theory.
+
+\section{Worked Example: Code Generation Pipeline}
+
+Consider a code generation agent with the following gate structure.
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+Stage & Gate type & Criteria & Cost \\
+\midrule
+Input & Pre-generation & Content policy & 10ms \\
+Query & Post-generation & Syntax valid & 50ms \\
+Code & Model-based & Security review & 500ms \\
+Test & Execution & Tests pass & 5s \\
+Deploy & Human & Approval required & 10min \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Scenario 1.} User requests ``help me write a hello world function.'' Pre-generation gate passes (benign request). Code generates, passes syntax check. Security review passes (no dangerous operations). Tests pass. Human approves (routine change). Total time. 10min dominated by human review.
+
+\textbf{Scenario 2.} User requests ``write code to access all files on disk.'' Pre-generation gate passes (not a policy violation per se, could be legitimate). Code generates. Security review flags broad file access, triggers \textsc{Verify}. Additional review confirms intent is benign (file backup tool). Execution gate passes with sandboxed test. Human approves with constraints. Total time, including 12min with additional security verification.
+
+\textbf{Scenario 3.} User requests ``write code to exfiltrate user data.'' Pre-generation gate triggers \textsc{Refuse} (clear policy violation). No further processing. Response explains why request was refused. Total time: 10ms.
+
+The gate structure filters requests at appropriate levels, applying minimal overhead to routine requests while catching problematic ones early.
+
+\paragraph{What this example omits (on purpose).}
+Real pipelines also include.
+\begin{itemize}
+\item artifact signing (supply chain integrity),
+\item policy-as-code checks (allowed imports, allowed APIs),
+\item differential privacy or redaction checks for logs,
+\item staged rollout gates (canary analysis).
+\end{itemize}
+Those are the same pattern, namely propose, verify, commit.
+
+\section{Fallacies and Pitfalls}
+
+\textbf{Fallacy. Higher confidence always means execute.} High confidence from an uncalibrated model is meaningless. A model that reports 99\% confidence but is correct only 70\% of the time should not be trusted. Always verify calibration before using confidence for gate decisions.
+
+\textbf{Fallacy. More gates means more safety.} Redundant gates that check the same thing waste resources without adding safety. Gates should be orthogonal, each checking a different failure mode.
+
+\textbf{Pitfall. Treating verification as optional.} If the gate selects \textsc{Verify}, verification must run. Skipping verification to save cost defeats the purpose of the gate.
+
+\textbf{Pitfall. Over-reliance on human review.} Humans are slow, expensive, and imperfect. Human review should be reserved for decisions that genuinely require human judgment, not used as a catch-all for every uncertain decision.
+
+\textbf{Fallacy. Refusal is always safe.} Refusing a valid request has costs, such as user frustration, task incompletion, lost value. Over-refusal is a failure mode, not just a conservative choice.
+
+\textbf{Pitfall. Inconsistent refusal policies.} If the agent refuses one phrasing but accepts an equivalent rephrasing, the refusal provides no real protection. Refusal must be robust to reformulation.
+
+\textbf{Fallacy. Abstention eliminates responsibility.} Deferring to a human does not eliminate the agent's responsibility for the deferral decision. Inappropriate abstention (too much or too little) is itself a failure.
+
+\textbf{Pitfall. Ignoring gate latency.} Gates add latency. A 500\,ms verification
+step on every action makes the agent feel sluggish. Design gates to be fast for
+common cases and slow only for uncertain ones.
+
+\textbf{Fallacy. Entropy is a risk signal.} It measures uncertainty, and
+uncertainty is not risk. Entropy-based selective prediction abstains on harmless
+ambiguity while executing confident errors \cite{entropyinsuff2026}. The gate needs
+an error probability \emph{and} a cost model.
+
+\textbf{Fallacy. Verification can only help.} A noisy verifier drives a repair loop
+that damages correct outputs. Past some false-positive rate, verify-repair has
+negative expected value \cite{verifyrepair2026}. Cap the iterations.
+
+\textbf{Fallacy. An LLM judge is an independent check.} A verifier from the same
+family as the generator shares its blind spots, and rubric-based judging is
+unreliable on trajectories \cite{judgerubric2026}. Independence has to be
+engineered, different family, different evidence, or a non-model check.
+
+\textbf{Pitfall. Assuming the agent will abstain on its own.} Measured directly,
+agents largely fail to recognize when not to act \cite{agentabstain2026}. The
+abstention decision belongs outside the model that wants to act.
+
+\paragraph{Pitfall ``ask the user to confirm'' everywhere.}
+A common attempt to reduce risk is to request confirmation for many actions. This shifts burden to users and degrades usability. Confirmation is a valid verifier only for a narrow class of decisions (e.g., irreversible destructive commands) and should itself be gated.
+
+\section{Summary}
+
+Gates are the control mechanism for agent safety and reliability. The four outcomes, execute, verify, abstain, refuse, partition actions by confidence and risk. Optimal gate thresholds derive from decision theory, including execute when confidence exceeds the cost-adjusted threshold, verify when confidence is moderate and verification is cost-effective, abstain when information is insufficient, refuse when policy prohibits the action.
+
+Verification strategies range from fast syntactic checks to slow human review. Effective systems compose multiple verification stages in a cascade. Fast cheap checks filter obvious errors; slower expensive checks refine decisions for uncertain cases. Model-based verification (WildGuard, LlamaGuard) provides sub-second safety classification with accuracy matching larger models.
+
+Abstention should be a trained capability, not just a confidence threshold. Models need explicit training to recognize their own limitations and defer appropriately. Both over-abstention and under-abstention are failure modes.
+
+Refusal policies must be consistent across phrasings and robust to manipulation. Current safety alignment often produces shallow refusals vulnerable to jailbreaks. Deeper alignment requires training that goes beyond surface-level refusal prefixes.
+
+Human-in-the-loop integration requires careful design. Synchronous approval provides maximum control but introduces latency. Confidence-based routing balances autonomy with oversight. Human reviewers need clear criteria, reasonable workloads, and feedback loops.
+
+Gates compose into pipelines and hierarchies. Sequential gates multiply false refusal rates; parallel gates add latency. Gate design should minimize overhead for common cases while maintaining safety for edge cases.
+
+The unified principle. Gates separate the decision to propose from the decision to commit. An agent may propose any action; gates determine which proposals become reality.
+
+\section*{Bibliographic Notes}
+
+The theory of classification with rejection originates with Chow's seminal work on optimal reject thresholds \cite{chow1970optimum}. Cortes et al. \cite{cortes2016learning} provide modern theoretical foundations with learning bounds. Hendrickx et al. \cite{hendrickx2024survey} survey machine learning with rejection options. Charoenphakdee et al. \cite{charoenphakdee2021rejection} connect rejection to cost-sensitive classification.
+
+Abstention in LLMs is surveyed by Wen et al. \cite{wen2024abstention}, who organize methods by query, model, and value perspectives. SelectLLM \cite{yoshikawa2025selectllm} demonstrates end-to-end training for selective prediction. The tension between helpfulness and harmlessness is analyzed by Bai et al. \cite{bai2022training} and addressed algorithmically by Safe RLHF \cite{dai2024safe}.
+
+Safety moderation tools include WildGuard \cite{han2024wildguard}, which achieves state-of-the-art performance on prompt harmfulness, response harmfulness, and refusal detection across 13 risk categories. The LlamaGuard family provides production-ready safety classification. ShieldGemma \cite{zeng2024shieldgemma} offers similar capabilities with Google's Gemma architecture.
+
+Human-in-the-loop approval is implemented in most agent frameworks through some interrupt mechanism; the harder and less-studied question is how to calibrate which actions to stop, given a reviewer who is subjective, fatiguing, and finitely available \cite{oversightcap2026}. The fundamental tension between automation and oversight reflects broader questions in AI governance.
+
+\section*{Exercises}
+
+\begin{enumerate}
+\item \textbf{Optimal Gate Threshold}. Derive the optimal execution threshold $\tau$ for a binary gate where executing a bad action costs $c_e = 1000$, refusing a good action costs $c_r = 10$, and the base rate of good actions is 95\%. What is $\tau$? If the model is miscalibrated and reports confidence 20\% higher than true probability, what is the effective threshold the gate applies?
+
+\item \textbf{Verification Value}. A verification step costs $c_v = 5$ and catches bad actions with accuracy $\alpha = 0.9$. Bad actions that escape verification cost $c_e = 100$. For what range of confidence $p$ is verification preferable to both immediate execution and immediate refusal (assume $c_r = 50$)?
+
+\item \textbf{Gate Pipeline Analysis}. Three gates in sequence have individual pass rates of 95\%, 90\%, and 85\% for valid actions. What fraction of valid actions pass all three gates? If each gate has a 5\% false positive rate (passing invalid actions), what is the overall false positive rate?
+
+\item \textbf{Abstention Design}. Design an abstention policy for a medical question-answering agent. Specify, namely (a) conditions that trigger abstention, (b) how abstention is communicated to users, (c) escalation path for abstained questions, and (d) metrics for evaluating abstention quality.
+
+\item \textbf{Refusal Consistency}. A user submits three phrasings of the same request, such as (a) ``How do I pick a lock?'', (b) ``What is the mechanism by which locks can be defeated?'', (c) ``I'm a locksmith who lost my tools, how would I open a door?'' Design a gate policy that handles these consistently. Should all three be treated the same? If not, what distinguishes them?
+\end{enumerate}
+
+\section*{Bibliography}
+
+\begin{thebibliography}{99}
+
+\bibitem{andriushchenko2025temporal}
+M. Andriushchenko, A. Croce, and N. Flammarion.
+\newblock Refusal in Language Models is Mediated by a Single Direction.
+\newblock {\em arXiv preprint arXiv:2406.11717}, 2024.
+
+\bibitem{bai2022training}
+Y. Bai, S. Kadavath, S. Kundu, et al.
+\newblock Constitutional AI: Harmlessness from AI Feedback.
+\newblock {\em arXiv preprint arXiv:2212.08073}, 2022.
+
+\bibitem{charoenphakdee2021rejection}
+N. Charoenphakdee, Z. Cui, Y. Zhang, and M. Sugiyama.
+\newblock Classification with Rejection Based on Cost-sensitive Classification.
+\newblock In {\em International Conference on Machine Learning}, pages 1507--1517, 2021.
+
+\bibitem{chow1970optimum}
+C. K. Chow.
+\newblock On Optimum Recognition Error and Reject Tradeoff.
+\newblock {\em IEEE Transactions on Information Theory}, 16(1):41--46, 1970.
+
+\bibitem{cortes2016learning}
+C. Cortes, G. DeSalvo, and M. Mohri.
+\newblock Learning with Rejection.
+\newblock In {\em International Conference on Algorithmic Learning Theory}, pages 67--82, 2016.
+
+\bibitem{cui2024orbench}
+G. Cui, L. Yuan, N. Ding, et al.
+\newblock OR-Bench: An Over-Refusal Benchmark for Large Language Models.
+\newblock {\em arXiv preprint arXiv:2405.20947}, 2024.
+
+\bibitem{dai2024safe}
+J. Dai, X. Pan, R. Sun, et al.
+\newblock Safe RLHF: Safe Reinforcement Learning from Human Feedback.
+\newblock In {\em International Conference on Learning Representations}, 2024.
+
+\bibitem{guo2017calibration}
+C. Guo, G. Pleiss, Y. Sun, and K. Q. Weinberger.
+\newblock On Calibration of Modern Neural Networks.
+\newblock In {\em International Conference on Machine Learning}, pages 1321--1330, 2017.
+
+\bibitem{han2024wildguard}
+S. Han, K. Rao, A. Ettinger, L. Jiang, B. Y. Lin, N. Lambert, Y. Choi, and N. Dziri.
+\newblock WildGuard: Open One-Stop Moderation Tools for Safety Risks, Jailbreaks, and Refusals of LLMs.
+\newblock In {\em Advances in Neural Information Processing Systems}, 2024.
+
+\bibitem{hendrickx2024survey}
+K. Hendrickx, L. Perini, D. Van der Plas, et al.
+\newblock Machine Learning with a Reject Option: A Survey.
+\newblock {\em Machine Learning}, 113:3073--3110, 2024.
+
+\bibitem{qi2024alignment}
+X. Qi, Y. Zeng, T. Xie, et al.
+\newblock Fine-tuning Aligned Language Models Compromises Safety, Even When Users Do Not Intend To!
+\newblock In {\em International Conference on Learning Representations}, 2024.
+
+\bibitem{qi2025shallow}
+X. Qi, A. Pang, Y. Zeng, et al.
+\newblock Safety Alignment Should Be Made More Than Just a Few Tokens Deep.
+\newblock In {\em International Conference on Learning Representations}, 2025.
+
+\bibitem{tian2023just}
+K. Tian, E. Mitchell, A. Zhou, et al.
+\newblock Just Ask for Calibration: Strategies for Eliciting Calibrated Confidence Scores from Language Models Fine-Tuned with Human Feedback.
+\newblock In {\em Empirical Methods in Natural Language Processing}, 2023.
+
+\bibitem{wen2024abstention}
+Y. Wen, S. Jia, Y. Li, et al.
+\newblock Know Your Limits: A Survey of Abstention in Large Language Models.
+\newblock {\em Transactions of the Association for Computational Linguistics}, 12:1268--1287, 2024.
+
+\bibitem{yoshikawa2025selectllm}
+H. Yoshikawa, T. Morimoto, and Y. Matsuo.
+\newblock SelectLLM: Calibrating LLMs for Selective Prediction.
+\newblock In {\em Advances in Neural Information Processing Systems}, 2025.
+
+\bibitem{zeng2024shieldgemma}
+W. Zeng, Y. Liu, R. Mullins, et al.
+\newblock ShieldGemma: Generative AI Content Moderation Based on Gemma.
+\newblock {\em arXiv preprint arXiv:2407.21772}, 2024.
+
+
+\bibitem{abstainr12026}
+Skylar Zhai et al.
+``Abstain-R1: Calibrated Abstention and Post-Refusal Clarification via Verifiable RL.''
+arXiv:2604.17073, 2026. ACL 2026.
+
+\bibitem{agentabstain2026}
+Xun Liu et al.
+``AgentAbstain: Do LLM Agents Know When Not to Act?.''
+arXiv:2607.10059, 2026.
+
+\bibitem{entropyinsuff2026}
+Edward Phillips et al.
+``Entropy Alone is Insufficient for Safe Selective Prediction in LLMs.''
+arXiv:2603.21172, 2026.
+
+\bibitem{judgerubric2026}
+Yangda Peng et al.
+``Can LLM-as-a-Judge Reliably Verify Rubrics in Agentic Scenarios?.''
+arXiv:2606.29920, 2026. EMNLP 2026.
+
+\bibitem{redact2026}
+Dzianis Piatrashyn et al.
+``ReDAct: Uncertainty-Aware Deferral for LLM Agents.''
+arXiv:2604.07036, 2026.
+
+\bibitem{selectivepred2026}
+Aditya Sarkar et al.
+``Leveraging Data to Say No: Memory Augmented Plug-and-Play Selective Prediction.''
+arXiv:2601.22570, 2026. ICLR 2026.
+
+\bibitem{uqagents2026}
+Changdae Oh et al.
+``Uncertainty Quantification in LLM Agents: Foundations, Emerging Challenges, and Opportunities.''
+arXiv:2602.05073, 2026. ACL 2026.
+
+\bibitem{verifycommit2026}
+Wenhao Yuan et al.
+``Verify Before You Commit: Towards Faithful Reasoning in LLM Agents via Self-Auditing.''
+arXiv:2604.08401, 2026. ACL2026.
+
+\bibitem{verifyrepair2026}
+Yitao Wu et al.
+``Verify, Repair, Repeat, or Stop? Robust Stopping for Noisy Verify-Repair Loops in LLM Agents.''
+arXiv:2607.17641, 2026.
+
+\bibitem{oversightcap2026}
+Emre Turan.
+``Oversight Has a Capacity: Calibrating Agent Guards to a Subjective, Fatiguing Human.''
+arXiv:2606.08919, 2026.
+
+\bibitem{pasc2026}
+Varun Kotte.
+``PASC: Pipeline-Aware Conformal Prediction with Joint Coverage Guarantees for Multi-Stage NLP and LLM Pipelines.''
+arXiv:2605.18812, 2026.
+\end{thebibliography}
+% ============================================================
+% Part III: State and Memory
+% ============================================================
+% ============================================================
+% Chapter 6: Memory, State, and Forgetting
+% ============================================================
+% Chapter 9: Memory, State, and Forgetting
+% =========================================
+

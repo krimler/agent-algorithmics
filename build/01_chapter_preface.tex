@@ -1,0 +1,88 @@
+\chapter*{Preface}
+\addcontentsline{toc}{chapter}{Preface}
+
+Here is a story you have probably lived through.
+
+You ship an agent. It works. For two weeks it answers questions, files tickets,
+and closes them, and everyone is delighted. Then someone runs it against a
+harder corpus and the token bill triples overnight. You add a cap. Now it stops
+halfway through the work and returns a confident, useless summary of what it
+was about to do. You add a retry. Now it books the same meeting twice.
+
+Nothing in that sequence is a modeling failure. The model was fine at every
+step. What failed was everything around it. No budget in the state. No reservation for the finish. No idea which actions could be taken back.
+
+This book is about that machinery.
+
+\vspace{1em}
+\noindent
+\textit{Who this is for.}
+Engineers and researchers who build, deploy, and operate autonomous or
+semi-autonomous agents in systems that other people depend on. I assume you are
+comfortable with algorithms, systems design, and probability, and that you are
+past the demo stage. You have seen an agent work, and now you need it to keep
+working on a Tuesday at 3 a.m. Background in distributed systems, control
+theory, or reinforcement learning will make some chapters easier, though none of
+it is required.
+
+\vspace{0.5em}
+\noindent
+\textit{What this book does.}
+It treats agents as \emph{algorithmic objects}, stateful decision processes
+running over time, under uncertainty, spending real money, bound by invariants
+you can write down. Language models appear here as components, the way a
+database or a network appears in a systems book. Useful, unreliable in
+characterized ways, and never the whole system.
+
+The chapters work through the following.
+\begin{itemize}
+\item action selection when the budget is finite and shrinking,
+\item verification, abstention, and refusal as control mechanisms with tunable thresholds,
+\item speculation, parallelism, and the protocols that decide when work becomes permanent,
+\item memory, retrieval, and the management of evidence,
+\item capability boundaries and what a tool call is allowed to reach,
+\item traces, telemetry, and evaluating a system whose output is a trajectory.
+\end{itemize}
+
+Throughout, the bias is toward designs you can audit, analyze, and reason about
+when they misbehave at scale.
+
+\vspace{0.5em}
+\noindent
+\textit{What this book is not.}
+It is not a prompt engineering guide, a tour of current frameworks, a
+manifesto, or a tutorial on training foundation models. You will not find
+advice here that amounts to ``use a better model.'' When a control problem,
+an alignment problem, or a cost problem shows up in these pages, it is treated
+as a systems problem, because that is where the fix lives.
+
+\vspace{0.5em}
+\noindent
+\textit{How to read it.}
+Chapters build on each other, and Part I earns the vocabulary the rest of the
+book spends. If you are shipping something next month, read the worked examples
+and the design patterns first, then come back for the derivations when a
+threshold you picked by feel starts misbehaving. If you came for the theory,
+the models and dominance arguments are stated explicitly and you can read them
+in order.
+
+Every chapter closes the same way. The fallacies that cost people real money,
+a summary, notes on where the ideas came from, and exercises that are meant to
+be worked rather than admired.
+
+\vspace{0.5em}
+\noindent
+\textit{On this revision.}
+Agent research moves fast enough that a year-old book is a historical document.
+This revision incorporates work published through mid-2026, and in several
+places that work corrected the earlier account rather than merely adding to it.
+Rollback turns out to be leakier than Chapter~\ref{ch:speculation} originally
+claimed, because clearing a branch from a transcript does not clear it from the
+serving cache. Benchmark scores turn out to measure the harness as much as the
+model. Context compaction, the standard fix for long-horizon memory pressure,
+turns out to quietly delete safety constraints. Where the field proved the
+first edition wrong, the text says so.
+
+The thesis survived. Reliable agent behavior comes from explicit control, and
+it does not emerge from better reasoning.
+

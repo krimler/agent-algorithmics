@@ -1,0 +1,846 @@
+\chapter{Memory, State, and Forgetting}
+\label{ch:memory}
+
+Memory is what makes an agent an agent, and it is also how an agent's mistakes
+become permanent.
+
+A system that forgets everything between responses is a function. It cannot learn
+your preferences, cannot build on yesterday's findings, and cannot notice that it
+has tried this approach twice already. Add memory and it can do all three. Add
+memory and one hallucinated fact, written once, is now retrieved confidently in
+every session that follows.
+
+That symmetry is the theme of this chapter. Memory amplifies whatever you put into
+it. Competence compounds, and so do errors, and the mechanisms are identical. A
+memory system cannot tell which it is propagating.
+
+So the interesting work is not storage. Storage is solved. The work is
+governance, including deciding what earns a place in memory, where it lives, when it is
+retrieved, when it is superseded, and when it is deleted. Every one of those is a
+policy decision with a failure mode, and this chapter is organized around them.
+
+The framing throughout is architectural, namely context windows behave like cache, token
+costs like memory bandwidth, retrieval latency like a miss penalty. The analogy is
+productive as long as you remember where it breaks, a CPU's cache controller
+cannot write a false entry that the CPU then believes.
+
+\section{The Memory Hierarchy}
+
+Computer systems organize memory hierarchically, such as registers, L1 cache, L2 cache, main memory, SSD, disk. Each level is larger, slower, and cheaper per bit than the one above. The genius of hierarchy is that most accesses hit fast levels while slow levels provide capacity. Agents face analogous tradeoffs, but with an important difference. The agent itself participates in memory management.
+
+Unlike CPUs, which rely on hardware cache controllers, agents must reason about memory placement using learned heuristics, explicit rules, or tool-mediated control. This makes memory both a capability and a source of failure.
+
+\subsection{Agent Memory Tiers}
+
+Agent memory organizes into five tiers.
+
+\begin{center}
+\begin{tabular}{llrrr}
+\toprule
+Tier & Hardware analog & Capacity & Access time & Cost model \\
+\midrule
+Context window & L1/L2 cache & 8K--200K tokens & 0 & \$/token/call \\
+Working memory & SRAM & 500K--2M tokens & 50--200ms & Memory \\
+Episodic store & DRAM & 10M--1B tokens & 100--500ms & Database \\
+Semantic store & SSD & 1B--100B tokens & 200--1000ms & Vector DB \\
+Archive & HDD/Tape & Unlimited & 1--10s & Object storage \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The \textbf{context window} holds what is immediately available for inference,
+and every token in it is processed on every forward pass. Context is therefore
+active compute input, which has a billing consequence worth stating plainly. A
+token you add to context is paid for on this call and on every subsequent call
+that carries it. Storage is a one-time charge. Context is a subscription.
+
+Like L1 cache, context access is instantaneous, but capacity is constrained by both model architecture and economics. Larger context windows increase expressivity but degrade signal-to-noise ratio and inflate compute cost.
+
+\textbf{Working memory} holds session state that does not fit in context but is still hot, including expanded conversation history, intermediate reasoning artifacts, retrieved documents awaiting synthesis. Access requires explicit retrieval but remains fast. This tier absorbs bursty state without polluting the inference path.
+
+\textbf{Episodic memory} stores interaction traces, namely ordered sequences of observations, actions, and outcomes. It is append-heavy, indexed by time, and optimized for recall rather than inference. Episodic memory supports debugging, audit, and learning, but is rarely injected wholesale into context.
+
+\textbf{Semantic memory} stores abstractions, such as facts, preferences, rules, and associations derived from experience. Unlike episodic memory, it is queried by meaning rather than time. Implementation typically uses vector databases or knowledge graphs. Semantic memory is slower to access but amortizes value across many sessions.
+
+\textbf{Archival memory} holds cold data, including old conversations, expired tasks, historical logs. Its role is preservation, not cognition. Retrieval is rare and expensive, but retention is effectively unlimited.
+
+\paragraph{Tier separation is mandatory, not optional.}
+Systems that collapse episodic, semantic, and working memory into a single store suffer from retrieval noise and uncontrolled growth. Separating tiers allows different retention policies, indexing strategies, and safety controls to be applied to different kinds of information.
+
+\subsection{Token Bandwidth: The Memory Bus Analogy}
+
+Just as memory bandwidth limits data movement in computer systems, token bandwidth limits information flow in agents. Every token retrieved from external memory consumes context capacity and inference cost. The effective bandwidth is
+\[
+B_{\text{token}} = \frac{\text{tokens retrievable per call}}{\text{latency} + \text{inference time}}
+\]
+
+This formulation makes an important point. Retrieval latency and inference cost are coupled. Increasing context size reduces retrieval latency (fewer cache misses) but increases inference time quadratically due to attention costs.
+
+Context windows have grown dramatically, namely GPT-4 supports 128K tokens, Claude supports 200K tokens, Gemini 1.5 Pro supports 1M tokens, and Llama 4 reaches 10M tokens \cite{anthropic2025claude}. Yet larger windows do not eliminate the bandwidth problem; they shift it. The bottleneck moves from retrieval latency to attention cost and model utilization.
+
+The principle is therefore not ``maximize context'' but \textbf{minimize tokens in context while maximizing information density}. This is the same principle that guides cache-aware programming, such as keep the working set small, hot, and relevant.
+
+\paragraph{Why density matters more than capacity.}
+A 100K-token context filled with loosely related text is worse than a 4K-token context containing only task-relevant constraints. Empirically, models attend unevenly; irrelevant tokens dilute attention and reduce effective reasoning capacity.
+
+\subsection{Cache Miss Penalty}
+
+When needed information is not in context, the agent must retrieve it. This retrieval has latency (the cache miss penalty) and may fail (the miss itself). The expected cost of a memory access is
+\[
+\mathbb{E}[\text{cost}] = h \cdot c_{\text{hit}} + (1-h)(c_{\text{miss}} + c_{\text{retrieve}})
+\]
+where $h$ is the hit rate, $c_{\text{hit}}$ is the in-context access cost (dominated by marginal token cost), $c_{\text{miss}}$ is the stall penalty, and $c_{\text{retrieve}}$ is the cost of retrieval computation.
+
+Optimizing agent memory therefore means maximizing $h$ for \emph{information that actually matters}, not maximizing cache size. Increasing context size increases $h$ but also increases $c_{\text{hit}}$, because every additional token is processed on every forward pass.
+
+\paragraph{Why naive RAG underperforms.}
+Retrieving large chunks of text to avoid misses increases hit rate but explodes $c_{\text{hit}}$. Systems that retrieve aggressively often pay more in inference cost than they save in retrieval latency.
+
+\subsection{The Lost-in-the-Middle Problem}
+
+Large context windows introduce a counterintuitive failure mode. Models struggle to use information in the middle of long contexts \cite{liu2024lost}. Performance is highest when relevant information appears near the beginning or end of the prompt; information buried in the middle is often ignored.
+
+So ``it fits in context'' does not imply ``the model will use it.'' Ordering is a
+first-class design decision, on par with selection. A system needs to control
+where information appears, not merely whether it is present. Put the constraint
+you care about in the middle of eighty thousand tokens and you have written it
+down without saying it.
+
+\paragraph{Operational implication.}
+Important constraints should be placed early (system instructions) or late (immediately before the question). Long retrieved documents should be summarized or segmented; otherwise, critical details vanish into the middle.
+
+\section{Virtual Context Management}
+
+The context window is finite; the information an agent might need is not. Virtual context management bridges this gap by creating the illusion of unlimited memory through intelligent paging, compression, and retrieval.
+
+Unlike static prompt construction, virtual context management treats context as a dynamic resource that changes over time. The agent itself participates in deciding what stays resident and what is evicted.
+
+\subsection{The MemGPT Architecture}
+
+MemGPT \cite{packer2024memgpt} introduced the operating system analogy explicitly. Treat the context window as RAM and external storage as disk. The LLM itself manages memory through function calls that page data in and out of context.
+
+This is a conceptual shift. Instead of the developer deciding memory policy entirely outside the model, the model is allowed to reason about its own memory footprint.
+
+The architecture has three components, including \textbf{Main context.} The fixed-size prompt visible to the LLM during inference. Partitioned into system instructions (static), working context (dynamic scratchpad), and a FIFO message buffer (recent conversation).
+
+\textbf{Recall storage.} Searchable database containing complete conversation history. Accessed via paginated search queries. Provides literal recall of past interactions.
+
+\textbf{Archival storage.} Vector database for long-term knowledge. Accessed via semantic search. Stores abstracted facts and learned information.
+
+The key innovation is \textbf{self-editing memory}. When the message buffer exceeds capacity, the system summarizes older content, evicts it to recall storage, and continues. Later, the model can retrieve that content if needed.
+
+Empirical results show that MemGPT agents maintain coherence across conversations that far exceed context limits, outperforming baselines that rely on fixed summarization strategies.
+
+\paragraph{Why self-editing matters.}
+Fixed summarization policies assume the developer knows what will matter later. Self-editing allows the agent to adapt memory strategy to task structure, user behavior, and failure signals.
+
+\subsection{Memory Blocks}
+
+The Letta framework \cite{letta2024memgpt} refines MemGPT with structured memory blocks. Discrete, labeled regions of context with defined purposes.
+
+\begin{center}.
+\begin{tabular}{lll}
+\toprule
+Block & Purpose & Character limit \\
+\midrule
+\texttt{persona} & Agent self-concept, capabilities & 2000 \\
+\texttt{human} & User information, preferences & 2000 \\
+\texttt{scratchpad} & Working notes, reasoning & 4000 \\
+\texttt{task} & Current task state & 2000 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Memory blocks impose structure on context. Instead of a flat prompt, the agent reasons over named regions with specific semantics. This mirrors how programmers separate stack, heap, and globals.
+
+The benefits are practical.
+\begin{itemize}
+\item Updates are localized, reducing accidental overwrites.
+\item Capacity limits prevent silent growth.
+\item Retrieval targets specific blocks instead of entire histories.
+\end{itemize}
+
+\subsection{Heartbeat Mechanism}
+
+Multi-step reasoning requires the agent to act multiple times before producing a user-visible response. MemGPT implements this via heartbeats. After emitting a tool call, the agent can request continuation by setting \texttt{request\_heartbeat=true}.
+
+This enables sequences such as, namely retrieve memory $\rightarrow$ update block $\rightarrow$ retrieve again $\rightarrow$ reason $\rightarrow$ respond. Without heartbeats, such workflows would require explicit user turns or brittle chaining logic.
+
+\paragraph{Heartbeats turn inference into a control loop.}
+The agent alternates between reasoning and memory operations until it converges. This is closer to an interpreter loop than a single function call, and it is essential for long-horizon tasks.
+\section{Memory Operations}
+
+Memory is an active subsystem, running continuously for as long as the agent
+lives. Every interaction can trigger a write, a read, an update, a compression, or
+a deletion, and each of those consumes resources and carries its own way of going
+wrong. Treating memory as a repository that sits still between queries is the
+mental model that produces untested write paths.
+
+A useful mental model is to treat memory operations as first-class system calls. Poorly designed memory operations dominate latency, inflate cost, and quietly degrade correctness.
+
+\subsection{Storage: What to Remember}
+
+Not all information deserves to be stored. Storing everything is the fastest way to poison retrieval. The storage decision trades future utility against present and ongoing cost
+\[
+\text{Store if, such as } \mathbb{E}[\text{future value}] > c_{\text{store}} + c_{\text{maintain}}
+\]
+
+The difficulty lies in estimating future value. Most conversational turns are transient, including greetings, acknowledgments, clarifications. Persisting them adds noise but little utility.
+
+Mem0 \cite{mem0_2025} addresses this by separating \emph{conversation} from \emph{memory formation}. Instead of summarizing everything, it selectively extracts facts.
+
+\textbf{Extraction phase.}
+Each interaction is scanned for candidate facts, namely preferences, commitments, stable attributes, project details. This phase is conservative by design. Most turns produce zero extracted facts. This restraint is essential; aggressive extraction overwhelms memory quality.
+
+\textbf{Update phase.}
+Extracted facts are compared against existing memory. The system decides whether to.
+\begin{itemize}
+\item Add new information (novel and relevant)
+\item Update an existing fact (refinement or correction)
+\item Delete a fact (explicit contradiction)
+\item Ignore the candidate (redundant or speculative)
+\end{itemize}
+
+This phase is where memory becomes dynamic rather than accumulative. Facts are not immutable; they evolve as the user evolves.
+
+On the LOCOMO benchmark, this selective strategy improves response quality by 26\% while reducing token costs by 80--90\% compared to naïve history retention \cite{mem0_2025}. The gain came from memory hygiene rather than from a better retrieval model. The work was deciding what deserved storing and removing what no longer did.
+
+\paragraph{Why selective storage matters.}
+Every stored fact increases the search space of retrieval. Noise compounds. A single incorrect preference can bias dozens of future responses. High-precision storage beats high-recall storage.
+
+The graph-based variant Mem0g extends this logic by structuring facts relationally. Entities become nodes; relationships become edges. This supports multi-hop queries without inflating context size, but increases complexity of update logic.
+
+\subsection{Retrieval: Finding Relevant Memory}
+
+Retrieval decides what past information influences the present decision. This makes retrieval one of the most safety-critical components of an agent.
+
+Two dominant paradigms exist. \textbf{Embedding-based retrieval.}
+Queries and stored items are encoded as vectors; nearest neighbors are retrieved. This is fast, scalable, and robust to paraphrasing. However, it is blind to time, causality, and explicit structure. It retrieves what is similar, not what is correct.
+
+\textbf{Structured retrieval.}
+Queries operate over explicit fields, such as timestamps, entities, predicates. This is precise but brittle. It requires structured storage and well-formed queries.
+
+Zep \cite{rasmussen2025zep} combines both approaches using a temporal knowledge graph. Facts are stored with timestamps and relationships. Retrieval can filter by.
+\begin{itemize}
+\item Time (recent vs historical)
+\item Entity (user, project, resource)
+\item Relation (ownership, dependency)
+\item Semantic similarity
+\end{itemize}
+
+This hybrid design captures both ``what happened'' and ``what it means''. It also enables provenance. Semantic facts can be traced back to episodes that generated them.
+
+\paragraph{Retrieval is a ranking problem, not a lookup.}
+Returning the wrong five memories is worse than returning none. Retrieval systems must optimize for precision under severe context constraints.
+
+\subsection{Compression: Reducing Memory Footprint}
+
+Long-running agents accumulate text rapidly. Tool outputs, logs, intermediate reasoning, and observations dwarf user input. Without compression, context becomes saturated long before useful work is done.
+
+Compression reduces token footprint while preserving decision-relevant information. All compression is lossy; the question is where loss is acceptable.
+
+\textbf{Summarization.}
+Hierarchical summarization \cite{wu2021recursively} reduces length by replacing detail with abstraction. It scales arbitrarily but introduces semantic drift. Once details are summarized away, they cannot be recovered.
+
+\textbf{Observation masking.}
+In agentic workflows, observations often dominate token count but are rarely re-used verbatim. Masking removes raw observations after they have influenced reasoning, retaining only actions and conclusions. Acon \cite{acon2025} shows that masking observations yields 26--54\% memory reduction with minimal performance loss.
+
+\textbf{Prompt compression.}
+Techniques like LLMLingua \cite{jiang2023llmlingua} remove redundancy at the token level. This preserves semantics but requires additional inference or preprocessing cost.
+
+\textbf{Embedding-based compression.}
+Methods such as PCC \cite{pcc2025} compress long contexts into dense vectors used as soft prompts. This achieves extreme compression ratios (up to 16$\times$) but sacrifices interpretability and fine-grained control.
+
+\paragraph{Compression policy matters.}
+Compress observations aggressively. Compress reasoning cautiously. Preserve raw data in archival storage even if summaries are used in context.
+
+\subsection{Forgetting: When to Delete}
+
+Forgetting is maintenance. A store that only ever grows becomes unreliable, not
+because any single entry is wrong but because superseded entries stay retrievable
+and compete with current ones.
+
+This is measurable, and the measurements are unflattering. Benchmarks that require
+memory to be \emph{updated} rather than merely recalled find systems that retrieve
+well and supersede badly \cite{recallforget2026}. An architectural study across
+thirteen memory systems traces the failure to where the model sits relative to the control plane. The operations that mutate memory, such as supersede, release, and purge, are far less exercised than the retrieval path, and correspondingly more broken \cite{controlplane2026}. Stress-testing confirms a consistent set of
+failure modes across implementations \cite{memfail2026}.
+
+The practical reading. Your memory system's read path is probably fine and its
+write and delete paths are probably untested. Test deletion the way you would test
+a database migration.
+
+Forgetting policies include. \textbf{Time-based expiration.}
+Delete memories older than a threshold. Simple and predictable, but blind to importance.
+
+\textbf{Access-based eviction.}
+Least-recently-used (LRU) deletion assumes access correlates with value. Works well for working memory; poorly for rare but critical facts.
+
+\textbf{Contradiction-based deletion.}
+New information invalidates old facts. Mem0 explicitly reasons about contradiction during updates, preferring replacement over accumulation.
+
+\textbf{Confidence-based pruning.}
+Low-confidence memories are removed first. This requires calibrated confidence estimates, which are difficult to maintain but powerful when available.
+
+\paragraph{Quality beats quantity.}
+A small set of accurate, up-to-date memories outperforms a large store polluted with stale or incorrect facts.
+
+\section{Context Engineering}
+
+Context engineering is the discipline of constructing optimal context windows for each inference call. It determines what information the model actually sees and attends to.
+
+As Andrej Karpathy notes, the context window functions like RAM in an operating system \cite{langchain2025context}. What does not fit in RAM must be paged, summarized, or ignored.
+
+\subsection{The Context Engineering Challenge}
+
+Symptoms of poor context engineering are predictable.
+\begin{itemize}
+\item Context overflow truncates critical information.
+\item Saturation fills context with irrelevant text.
+\item Attention dilution hides important constraints.
+\item Costs increase without proportional gains.
+\end{itemize}
+
+Performance degrades nonlinearly with context length, and in position-dependent
+ways, including material in the middle of a long context is attended to less reliably than
+material at either end \cite{liu2024lost}. A larger window raises the ceiling on
+what you \emph{can} include and does nothing about what the model will actually
+use. Treat context as a curated budget rather than a container.
+
+\subsection{Context Strategies}
+
+Four operations define context control, namely \textbf{Write.}
+Persist information outside context for later retrieval. Reduces immediate load but incurs future retrieval cost.
+
+\textbf{Select.}
+Retrieve a small, relevant subset of stored information. This is where most RAG systems fail, such as poor selection pollutes context.
+
+\textbf{Compress.}
+Reduce tokens while preserving meaning. Summarization, masking, and compression belong here.
+
+\textbf{Isolate.}
+Separate contexts by function. Tool execution, reasoning, and user interaction should not share uncontrolled context. Isolation reduces interference.
+
+Effective systems combine all four. No single strategy suffices on its own.
+
+\subsection{Compression Has Side Effects}
+
+Compress is the operation teams reach for first, because it is the one that
+visibly reduces the bill. It is also the one with the least-examined consequences,
+and two recent results should change how you deploy it.
+
+\textbf{It weakens recency.} Recurrent context compression measurably reduces the
+influence of recent interactions on the agent's behavior
+\cite{compressreliab2026}. This is exactly backwards for long-horizon work, where
+the most recent turns usually carry the current sub-goal. The mechanism is
+straightforward once stated, including summarization compresses old material into dense,
+high-salience text, and that dense summary then competes with, and often
+outweighs. The verbose recent turns it sits beside.
+
+\textbf{It deletes constraints.} This is the more serious finding. Context
+compaction silently removes safety and policy instructions that happen to fall in
+the summarized region, so a long-running agent can end up operating without the
+constraints it started under, with nothing in the trace marking the moment they
+disappeared \cite{govdecay2026}.
+
+Sit with the failure mode. The agent is not jailbroken. No adversary is involved.
+A routine memory optimization, running on schedule, quietly removed the sentence
+that said not to issue refunds above \$500, and the agent then behaved exactly as
+a well-aligned agent would in the absence of that constraint.
+
+Three consequences follow, and they are design rules rather than suggestions.
+
+\begin{enumerate}
+\item \textbf{Constraints do not live in the context window.} Anything that must
+hold for the whole run belongs in code the compactor cannot reach, the gate
+predicates of Chapter~\ref{ch:gates}, evaluated per action, independent of what
+the prompt currently says. A constraint in a system prompt is a hint with good
+intentions.
+
+\item \textbf{Compaction is an action, not maintenance.} It changes state, it can
+violate invariants, and it should therefore emit a trace event
+(Chapter~\ref{ch:traces}) recording what was removed. ``Compacted 14 turns'' is
+not enough; you want to be able to answer ``did the policy text survive?''
+
+\item \textbf{Compaction needs a post-condition.} Check the invariant after
+compacting, the way you would after any state mutation. Re-assert critical
+instructions into the retained region rather than trusting that the summarizer
+judged them important.
+\end{enumerate}
+
+Budget-aware context management helps here by making retention an explicit
+allocation against a stated allowance rather than a heuristic trigger
+\cite{contextbudget2026}, and programmatic approaches that keep the context
+revisable let a bad compaction decision be undone once its cost becomes visible
+\cite{contextenv2026, acmgmt2026}. Neither removes the need for the post-condition.
+
+\subsection{Hierarchical Context Architecture}
+
+Production agents typically implement multiple context scopes, namely \textbf{System scope.}
+Static instructions and persona. Loaded once; rarely modified.
+
+\textbf{Session scope.}
+Conversation state and task progress. Updated throughout a session.
+
+\textbf{Turn scope.}
+Immediate query, retrieved facts, tool outputs. Ephemeral by design.
+
+This mirrors transaction models in databases. System scope is committed state. Session scope is transactional. Turn scope is speculative.
+
+\paragraph{Why hierarchy matters.}
+Without scope separation, temporary information leaks into long-term memory and long-term constraints clutter short-term reasoning.
+
+\section{Episodic vs. Semantic Memory}
+
+The episodic–semantic distinction from cognitive psychology maps cleanly onto agent architectures.
+
+\subsection{Episodic Memory: What Happened}
+
+Episodic memory records sequences of events. It preserves order and context. It answers questions like ``what did we do?'' and ``when did this occur?''
+
+Implementation uses append-only logs or relational stores. Letta stores episodic memory in PostgreSQL with timestamps and metadata.
+
+Episodic memory supports continuity, debugging, auditability, and offline learning. It is rarely injected wholesale into context.
+
+\subsection{Semantic Memory: What I Know}
+
+Semantic memory stores abstractions, such as facts, preferences, constraints. It answers ``what is true?'' independent of time.
+
+Implementation typically uses vector databases or knowledge graphs. Semantic memory generalizes across episodes and persists across sessions.
+
+\subsection{The Interaction Problem}
+
+Episodic and semantic memory are not independent.
+
+Episodes generate facts. Facts influence interpretation of future episodes. Contradictions must be resolved. Provenance must be preserved.
+
+Design questions include.
+\begin{itemize}
+\item Which episodes yield semantic facts?
+\item When should facts be updated or revoked?
+\item Should retrieved facts carry links to their source episodes?
+\end{itemize}
+
+Poor handling here leads to brittle personalization and hallucinated consistency.
+\section{State Management}
+
+Memory content alone is insufficient. Agents must manage memory state, including how memory is initialized, persisted, synchronized, and kept consistent over time. These concerns are familiar from distributed systems, but agent architectures often rediscover them the hard way.
+
+\subsection{Initialization}
+
+Agents do not begin life with memory; they are initialized into it. Initialization choices determine early behavior and long-term stability.
+
+\textbf{Cold start.}
+The agent begins with empty memory. This avoids inherited errors but forces the user to re-establish preferences, context, and constraints. Cold start is safe but inefficient.
+
+\textbf{Warm start.}
+The agent is initialized with templates, seed knowledge, or prior states. This improves early usefulness but risks importing irrelevant or incorrect assumptions.
+
+\textbf{Transfer.}
+Memory is copied from a previous agent version or related agent. This enables continuity across deployments but requires schema compatibility and validation. Transferring malformed or obsolete memory can silently degrade behavior.
+
+The Letta framework supports explicit memory initialization through declarative configuration, making initialization reproducible rather than implicit.
+
+\paragraph{Initialization is a trust boundary.}
+Memory imported at initialization is treated as ground truth. Errors introduced here are rarely corrected organically.
+
+\subsection{Persistence}
+
+Agent memory must survive failures, namely process restarts, crashes, redeployments, and upgrades.
+
+Persistence strategies include, such as \textbf{Database backing.}
+Relational or document databases provide durability, indexing, and transactional semantics. This is the standard choice for production agents.
+
+\textbf{File-based persistence.}
+Memory stored as serialized files is simple but fragile. Concurrency and partial writes introduce corruption risk.
+
+\textbf{Object storage.}
+Highly durable and scalable, but high latency. Suitable for archival memory, not active state.
+
+Letta persists all memory blocks, episodic history, and archival state in PostgreSQL. This allows agents to resume execution exactly where they stopped, a property critical for long-running workflows.
+
+\subsection{Synchronization}
+
+When memory is accessed concurrently, synchronization becomes necessary. Common scenarios include.
+\begin{itemize}
+\item Multiple replicas serving the same user
+\item Background processes updating memory
+\item Multi-agent systems sharing state
+\end{itemize}
+
+Classical solutions apply.
+\begin{itemize}
+\item Transactions for atomic updates
+\item Locks for exclusive access
+\item Versioning for optimistic concurrency
+\end{itemize}
+
+Memory updates should follow the same commit discipline as actions (Chapter~\ref{ch:speculation}). Speculative memory updates that fail validation must be rolled back, not partially applied.
+
+\subsection{Consistency Models}
+
+Memory systems expose different consistency guarantees. \textbf{Strong consistency.}
+All reads observe the latest write. Easy to reason about; expensive to scale.
+
+\textbf{Eventual consistency.}
+Writes propagate asynchronously. Reads may be stale temporarily. Scales well but complicates reasoning.
+
+\textbf{Session consistency.}
+Within a session, reads see session writes; across sessions, consistency is eventual. This is the default for conversational agents.
+
+Session consistency aligns with user expectations. What I just said should be remembered immediately, but cross-device synchronization can lag.
+
+\section{Eviction Is an Online Algorithms Problem}
+
+Memory systems accumulate, so something has to be evicted, and most systems reach for least-recently-used (LRU) or least-frequently-used (LFU) eviction because those are the policies everyone knows.
+
+On semantic workloads they are the wrong policies, and measurably so. Formalizing
+the agent retrieval buffer as online semantic cache replacement with switching
+costs, where items match by embedding similarity and hit quality is continuous
+rather than binary, produces an uncomfortable finding. Classic heuristics consistently underperform plain first-in-first-out (FIFO) eviction, because semantic workloads lack the temporal locality and frequency concentration those heuristics were designed to exploit \cite{cachepolicy2026}.
+
+Sit with that. A team that reaches for LRU because it is the obvious choice is
+doing worse than a team that did the simplest possible thing, and neither team
+will notice without measuring hit quality rather than hit rate.
+
+Learning-augmented policies do better than both, which is the expected outcome
+once the workload has structure that hand-designed heuristics do not encode.
+The general lesson is that memory eviction is an online algorithms problem with
+its own competitive analysis, not a configuration setting.
+
+\section{Context Assembly as Query Execution}
+
+Chapter~\ref{ch:cost} treated the context window as a budget. There is a more
+productive analogy available.
+
+Context assembly decides what enters each prompt, in what order, and when to
+compact, under a hard window budget and a byte-sensitive prompt cache. That is
+structurally isomorphic to query execution in a relational database, where a
+planner also works under a hard budget, exploits a tiered cache, and uses
+statistics to choose a plan \cite{contextpipe2026}.
+
+Taking the analogy seriously suggests a plan-bind-optimize-execute pipeline in
+place of the scattered prompt builders, ad hoc compaction routines, and
+cache-break workarounds that production systems accumulate. The practical payoff
+is that context decisions become inspectable. You can ask why a given item was
+included, which is not a question most agent runtimes can currently answer.
+
+\section{Privacy and Security}
+
+Persistent memory introduces risks absent in stateless systems.
+
+\subsection{Data Retention}
+
+Agents must decide what to retain and for how long. Retention policies must balance utility against risk.
+
+The key requirements are as follows.
+\begin{itemize}
+\item Configurable expiration policies
+\item User-initiated deletion
+\item Data export and inspection
+\item Audit logs for compliance
+\end{itemize}
+
+Claude’s memory system \cite{anthropic2025memory} exemplifies this approach, including memories are user-scoped, inspectable, and deletable.
+
+\subsection{Memory Isolation}
+
+In multi-tenant systems memory must be strictly isolated, because cross-user
+leakage is the failure that ends products.
+
+Writable, cross-session memory also creates a threat class that stateless systems
+do not have. Because it is persistent, stateful, and propagating, an injection
+that lands in memory once can influence every later session, and a survey of
+long-term memory security in agents catalogs the attacks and the (thinner) set of
+defenses \cite{memsec2026}. Concretely. Prompt injection that survives in stored
+memory has been demonstrated as a cross-session attack \cite{crosssession2026}.
+
+The consequence for design is that memory writes are a trust boundary, not a
+convenience. Content derived from untrusted observations should not be promoted to
+persistent memory without passing the same gate an action would
+(Chapter~\ref{ch:gates}), and stored memories should carry provenance so that a
+later audit can ask where a belief came from.
+
+Isolation requires the following.
+\begin{itemize}
+\item User-scoped identifiers on every memory record
+\item Database-level access controls
+\item Encryption of sensitive fields
+\item Periodic isolation audits
+\end{itemize}
+
+Memory isolation failures are rarely obvious. They surface as subtle personalization errors long before they are detected as breaches.
+
+\subsection{Adversarial Memory Attacks}
+
+Attackers may target memory rather than inference.
+
+\textbf{Memory injection.}
+The attacker induces the agent to store false facts that bias future behavior.
+
+\textbf{Memory extraction.}
+The attacker probes responses to recover stored information.
+
+\textbf{Retrieval poisoning.}
+Embedding manipulation causes malicious content to surface for benign queries.
+
+Defenses include provenance tracking, validation at write time, and safety filters at retrieval time. Current systems remain vulnerable \cite{memoryprivacy2025}; production deployments should assume memory is an attack surface.
+
+\section{Worked Example: Personal Assistant Agent}
+
+Consider a personal assistant managing calendar, email, and tasks across weeks.
+
+\textbf{Memory tiers.}
+Context holds the current task and today’s schedule. Working memory holds the active task list. Episodic memory records all interactions. Semantic memory stores preferences and project facts. Archive stores historical data.
+
+\textbf{Memory blocks.}
+User profile, calendar snapshot, task state, and conversational context are maintained separately.
+
+\textbf{Operational flow.}
+Each morning, relevant calendar events are loaded. During interaction, tasks are updated and preferences refined. At day’s end, completed items are archived and summaries persisted.
+
+\paragraph{Key invariant.}
+Only information needed for the current decision enters context. Everything else remains retrievable but inactive.
+
+\section{Fallacies and Pitfalls}
+
+\textbf{Fallacy. Larger context windows eliminate memory management.}
+Costs scale linearly; attention does not. Memory management remains essential.
+
+\textbf{Fallacy. RAG equals memory.}
+RAG retrieves documents; memory manages state. They solve different problems.
+
+\textbf{Pitfall. Storing everything.}
+Noise grows faster than signal. Retrieval degrades silently.
+
+\textbf{Pitfall. Ignoring latency.}
+Multiple retrievals per turn accumulate into user-visible delay.
+
+\textbf{Fallacy. Summaries preserve truth.}
+Summarization is lossy. Preserve raw data elsewhere.
+
+\textbf{Pitfall. Treating all memory uniformly.}
+Preferences, facts, logs, and tasks have different lifecycles.
+
+\textbf{Fallacy. Memory is passive.}
+Memory without curation degrades faster than no memory at all.
+
+\section{Summary}
+
+Memory decides what the agent believes, and therefore what it does. Treat it as a
+control surface with the same care you give the action path.
+
+Agent memory must balance capacity, latency, cost, correctness, and privacy. The hierarchy mirrors computer architecture, namely small, fast context; larger, slower stores beneath.
+
+Virtual context management allows agents to operate beyond fixed windows. Selective storage and deliberate forgetting preserve quality. Compression reduces cost without sacrificing decision integrity. Context engineering determines what the model actually attends to.
+
+Episodic and semantic memory serve distinct roles and must interact carefully. State management ensures durability and consistency. Privacy and security transform memory from a convenience into a liability if mishandled.
+
+The unifying principle holds: \textbf{memory is active, not passive}. The intelligence of an agent lies as much in what it remembers, and forgets, as in what it generates.
+
+\section*{Exercises}
+
+\begin{enumerate}
+\item \textbf{Memory Hierarchy Design}. Design a memory hierarchy for a customer support agent handling 50 tickets per day across 3-month customer relationships. Specify, such as (a) what information belongs in each tier, (b) what triggers movement between tiers, (c) retention policies for each tier, and (d) expected hit rates for context-window access.
+
+\item \textbf{Compression Tradeoff}. An agent's trajectory consists of 100 turns with average observation size of 500 tokens and average reasoning size of 200 tokens. Context window is 8K tokens. Calculate, including (a) how many turns fit without compression, (b) the compression ratio needed to fit all 100 turns, (c) using observation masking (keep reasoning, discard observations), how many turns fit.
+
+\item \textbf{Fact Extraction}. Given the user message ``I prefer meetings in the afternoon, never before 10am, and I'm traveling to Tokyo next week so adjust for JST,'' identify. (a) facts to store in semantic memory, (b) temporal scope of each fact (permanent preference vs. temporary state), (c) how the agent should update if the user later says ``Actually I'm flexible on morning meetings now.''
+
+\item \textbf{Retrieval Optimization}. A semantic memory contains 10,000 facts. Each retrieval returns top-5 results with 200ms latency. An agent averages 3 retrievals per turn. Calculate, namely (a) total retrieval latency per turn, (b) if retrieval can be parallelized, the minimum latency, (c) if facts can be batched into a single query returning top-15, the new latency assuming 300ms for larger result set.
+
+\item \textbf{Privacy Design}. Design memory isolation for a multi-tenant agent serving 1000 users. Specify, such as (a) data model ensuring user isolation, (b) access control mechanism, (c) response to ``forget me'' requests, (d) audit logging for compliance, (e) defense against cross-user memory extraction attacks.
+\end{enumerate}
+
+\section*{Bibliography}
+
+\section*{Bibliographic Notes}
+
+The memory-hierarchy framing follows classical computer architecture; the
+agent-specific version begins with MemGPT \cite{packer2023memgpt}, which made the
+virtual-memory analogy explicit and introduced paging between context and
+external store.
+
+Position-dependent degradation in long contexts is documented by Liu et al.
+\cite{liu2024lost}, and remains the strongest argument against treating a larger
+window as a solution to memory pressure.
+
+Recent benchmark work has shifted from recall toward mutation. \emph{From Recall
+to Forgetting} \cite{recallforget2026} evaluates whether stored facts can be
+correctly superseded; AMemGym \cite{amemgym2026} makes the evaluation interactive
+and on-policy rather than static; MemFail \cite{memfail2026} stress-tests failure
+modes across implementations. The architectural study in \cite{controlplane2026}
+is the most useful of these for a designer, since it locates failures in the control plane rather than in retrieval, covering the supersede, release, and purge operations across thirteen systems.
+
+The survey in \cite{memsurvey2026} is a reasonable entry point to the broader
+literature on long-horizon and self-evolving agent memory.
+
+On compression, \cite{compressreliab2026} measures the recency degradation that
+recurrent compression induces, and \cite{govdecay2026} documents the
+safety-constraint erasure discussed in Section~\ref{ch:memory}. Budget-aware
+\cite{contextbudget2026} and programmatic \cite{contextenv2026, acmgmt2026}
+approaches to context management are the current alternatives to fixed heuristic
+compaction.
+
+Memory security is surveyed in \cite{memsec2026}; cross-session persistence of
+injected content is demonstrated in \cite{crosssession2026}.
+
+\begin{thebibliography}{99}
+
+\bibitem{acon2025}
+H. Acon, J. Chen, and S. Liu.
+\newblock Acon: Agent Context Optimization for Long-Horizon LLM Agents.
+\newblock {\em arXiv preprint arXiv:2510.00615}, 2025.
+
+\bibitem{anthropic2025claude}
+Anthropic.
+\newblock Claude 3.7 Sonnet Model Card.
+\newblock Technical Report, 2025.
+
+\bibitem{anthropic2025memory}
+Anthropic.
+\newblock Claude Memory System Documentation.
+\newblock Technical Report, 2025.
+
+\bibitem{compression_survey_2025}
+Y. Chen, H. Wang, and L. Zhang.
+\newblock Prompt Compression for Large Language Models: A Survey.
+\newblock In {\em Annual Conference of the North American Chapter of the Association for Computational Linguistics}, 2025.
+
+\bibitem{jiang2023llmlingua}
+H. Jiang, Q. Wu, C. Lin, Y. Yang, and L. Qiu.
+\newblock LLMLingua: Compressing Prompts for Accelerated Inference of Large Language Models.
+\newblock In {\em Empirical Methods in Natural Language Processing}, 2023.
+
+\bibitem{langchain2025context}
+LangChain.
+\newblock Context Engineering for Agents.
+\newblock Technical Report, 2025.
+
+\bibitem{letta2024memgpt}
+Letta.
+\newblock MemGPT: Memory Blocks and Virtual Context Management.
+\newblock Documentation, 2024.
+
+\bibitem{liu2024lost}
+N. F. Liu, K. Lin, J. Hewitt, A. Paranjape, M. Bevilacqua, F. Petroni, and P. Liang.
+\newblock Lost in the Middle: How Language Models Use Long Contexts.
+\newblock {\em Transactions of the Association for Computational Linguistics}, 12:157--173, 2024.
+
+\bibitem{mem0_2025}
+Mem0.
+\newblock Mem0: Building Production-Ready AI Agents with Scalable Long-Term Memory.
+\newblock {\em arXiv preprint arXiv:2504.19413}, 2025.
+
+\bibitem{memoryprivacy2025}
+Y. Wang, S. Chen, and L. Zhang.
+\newblock Unveiling Privacy Risks in LLM Agent Memory.
+\newblock {\em arXiv preprint arXiv:2502.00000}, 2025.
+
+\bibitem{packer2024memgpt}
+C. Packer, V. Fang, S. Patil, K. Lin, S. Wooders, and J. Gonzalez.
+\newblock MemGPT: Towards LLMs as Operating Systems.
+\newblock In {\em International Conference on Learning Representations}, 2024.
+
+\bibitem{pcc2025}
+H. Liao, Y. Chen, and Z. Wang.
+\newblock Pretraining Context Compressor for Large Language Models with Embedding-Based Memory.
+\newblock In {\em Annual Meeting of the Association for Computational Linguistics}, 2025.
+
+\bibitem{rasmussen2025zep}
+P. Rasmussen, P. Paliychuk, T. Beauvais, J. Ryan, and D. Chalef.
+\newblock Zep: A Temporal Knowledge Graph Architecture for Agent Memory.
+\newblock {\em arXiv preprint arXiv:2501.13956}, 2025.
+
+\bibitem{tulving1972episodic}
+E. Tulving.
+\newblock Episodic and Semantic Memory.
+\newblock In E. Tulving and W. Donaldson, editors, {\em Organization of Memory}, pages 381--403. Academic Press, 1972.
+
+\bibitem{wu2021recursively}
+J. Wu, W. Xu, W. L. Tam, Z. Liu, and J. Li.
+\newblock Recursively Summarizing Books with Human Feedback.
+\newblock {\em arXiv preprint arXiv:2109.10862}, 2021.
+
+
+\bibitem{acmgmt2026}
+Gaurav Dadhich.
+``Agentic Context Management: Solving Agent Memory and Cost by Treating Them as Lifecycle and Architecture Problems.''
+arXiv:2607.21503, 2026.
+
+\bibitem{compressreliab2026}
+Guanghui Min et al.
+``Toward Reliable Context Compression for Long-Horizon Agents: An Empirical Study of Execution Instability.''
+arXiv:2608.06503, 2026.
+
+\bibitem{contextbudget2026}
+Yong Wu et al.
+``ContextBudget: Budget-Aware Context Management for Long-Horizon Search Agents.''
+arXiv:2604.01664, 2026.
+
+\bibitem{contextenv2026}
+Yin Lin et al.
+``Context as an Environment: Programmatic Context Management for Long-Horizon Agents.''
+arXiv:2608.21690, 2026.
+
+\bibitem{controlplane2026}
+Dongxu Yang.
+``Control-Plane Placement Shapes Forgetting: An Architectural Study of Agent Memory Across Thirteen System Configurations.''
+arXiv:2606.15903, 2026.
+
+\bibitem{govdecay2026}
+Shiyang Chen.
+``Governance Decay: How Context Compaction Silently Erases Safety Constraints in Long-Horizon LLM Agents.''
+arXiv:2606.22528, 2026.
+
+\bibitem{memfail2026}
+Ishir Garg et al.
+``MemFail: Stress-Testing Failure Modes of LLM Memory Systems.''
+arXiv:2605.26667, 2026.
+
+\bibitem{recallforget2026}
+Md Nayem Uddin et al.
+``From Recall to Forgetting: Benchmarking Long-Term Memory for Personalized Agents.''
+arXiv:2604.20006, 2026. ACL 2026.
+
+\bibitem{crosssession2026}
+Yuanbo Xie et al.
+``What If Prompt Injection Never Left? Rethinking Agent Security through Cross-Session Stored Prompt Injection.''
+arXiv:2606.04425, 2026.
+
+\bibitem{memsec2026}
+Zehao Lin et al.
+``A Survey on Long-Term Memory Security in LLM Agents: Attacks, Defenses, and Governance Across the Memory Lifecycle.''
+arXiv:2604.16548, 2026.
+
+\bibitem{amemgym2026}
+Cheng Jiayang et al.
+``AMemGym: Interactive Memory Benchmarking for Assistants in Long-Horizon Conversations.''
+arXiv:2603.01966, 2026. ICLR 2026.
+
+\bibitem{memsurvey2026}
+Wei-Chieh Huang et al.
+``A Survey of Agent Memory in the Second Half: Towards Self-Evolving and Long-Horizon Agents.''
+arXiv:2602.06052, 2026. TMLR.
+\bibitem{packer2023memgpt}
+C.~Packer et~al.
+\newblock MemGPT: Towards LLMs as operating systems.
+\newblock \emph{arXiv preprint arXiv:2310.08560}, 2023.
+
+
+\bibitem{cachepolicy2026}
+Yushi Sun et al.
+``When Classic Cache Policies Fail: Learning-Augmented Replacement for Semantic Retrieval Buffers.''
+arXiv:2607.00394, 2026.
+
+\bibitem{contextpipe2026}
+Peng Xu et al.
+``ContextPipe: Database-Inspired Context Assembly for Long-Horizon Agents.''
+arXiv:2609.00749, 2026.
+\end{thebibliography}
+% ============================================================
+% Chapter 7: Retrieval and Evidence Management
+% ============================================================
+% Chapter 10, Part I
+% ===================
+

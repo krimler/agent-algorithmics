@@ -1,0 +1,621 @@
+\chapter{A Short History of Agents, Control, and Commitment}
+\label{ch:history}
+
+In 1979, a database researcher worried about a bank transfer that debits one
+account and crashes before crediting the other. In 2026, an engineer worries about
+an agent that charges a card and crashes before recording the order. These are the
+same problem, and only one of those people had a protocol for it.
+
+Modern agents look new. They are language-driven, tool-using, autonomous, adaptive,
+and they arrived fast enough that the field has mostly been reinventing rather than
+reading. But their characteristic failures were catalogued and largely solved in other
+disciplines, some of them decades ago. Runaway resource consumption. Oscillation.
+Acting on stale state. Committing to work that cannot be undone.
+
+This chapter is a tour of that inheritance. It is deliberately incomplete; the
+point is to show where each of the next twelve chapters got its ideas, and to make
+the case that the failures you are seeing in production are older than they look.
+
+It is also the one chapter you can skip. Nothing later depends on it, and each
+borrowed mechanism is developed properly at the point of use. Terms are glossed
+where they first appear, so no prior background in control theory or transaction
+processing is assumed.
+\section{Part I: Computation Without Action}
+
+Classical computer science is built on a precise abstraction. Computation as a
+closed process that transforms input into output and then halts. This abstraction
+has been extraordinarily successful. It underlies algorithm design, complexity
+theory, compilers, and formal verification. It also excludes, by construction,
+nearly every phenomenon that dominates the behavior of modern agent systems.
+
+The abstraction is sound. The trouble is that it gets applied outside its domain
+without anyone noticing the boundary was crossed.
+
+In the Turing model, correctness is defined relative to termination and final
+output \cite{turing1936computable}. A computation that does not halt has no semantic
+value, and a computation that halts with the wrong output is incorrect. Partial
+progress, intermediate states, and resource consumption during execution have no
+formal status. This notion of correctness is appropriate for algorithms. It is
+incompatible with agents. An agent that halts is typically failing, while an agent
+that continues operating under constraints may be succeeding. For agents,
+correctness must be defined incrementally, over time, rather than at termination.
+
+Equally important is the absence of action. A Turing machine modifies symbols on a
+tape. These modifications have no effect beyond the computation itself. Restarting
+the computation erases all consequences. As a result, classical computation has no
+need for an explicit notion of commitment. There is no distinction between
+tentative and final state, because all state is internal and disposable. This
+assumption is harmless for algorithms. It becomes dangerous when systems interact
+with the external world, where actions may be irreversible and observable by other
+systems.
+
+Cost in classical computation is comparative and asymptotic. Time and space
+complexity order algorithms by growth rate; they do not constrain execution.
+Exceeding an expected runtime bound does not invalidate a computation. It merely
+makes it inefficient. Agent systems operate under absolute limits, namely deadlines,
+quotas, budgets, and escalation thresholds. Exceeding these limits terminates
+execution or triggers control paths that cannot be ignored. Classical cost models
+do not express this distinction. When they are applied to agents, budget exhaustion
+is treated as a performance issue rather than as a correctness failure.
+
+Because classical computation lacks absolute cost limits, it also lacks budget
+semantics. There is no notion of refusing to compute because resources are
+insufficient, nor of reserving resources for future steps. Every computation is
+implicitly authorized to consume unbounded resources until termination. When this
+assumption is inherited by agent systems, unbounded verification, retrieval, and
+retry loops become the default behavior rather than a design error.
+
+Another implicit assumption is reversibility. Classical computation assumes that
+errors can be corrected by restarting execution. State corruption does not
+propagate beyond the failed computation. Agents do not enjoy this property. They
+accumulate state across decisions, interact with shared environments, and
+influence other systems. Errors propagate through memory, configuration, and
+downstream actions. Restarting does not restore the initial conditions. Any design
+that relies on implicit rollback is therefore unsound.
+
+Notably, none of these assumptions were fundamentally altered by the introduction
+of interactivity. Time-sharing systems added preemption and scheduling
+\cite{corbato1962experimental}, but they did not change the semantics of execution.
+Processes could be delayed or terminated, yet their actions remained largely
+reversible and local. Interactivity introduced latency constraints without
+introducing commitment semantics. The system still did not act in an irreversible
+environment.
+
+Despite the evolution of computing toward networked services and automation, these
+assumptions persist. Many modern systems still implicitly assume that execution is
+cheap relative to decision-making, that errors can be retried safely, and that
+state can be discarded without consequence. These assumptions are reasonable for
+algorithms. They are false for autonomous agents with authority.
+
+Agent systems violate every foundational assumption of classical computation. They
+do not halt cleanly, they act irreversibly, they operate under hard budgets, and
+they accumulate state across decisions. Treating agents as extended algorithms
+therefore produces systems that are formally well-defined yet operationally
+unsafe. The remainder of this book introduces the semantics that classical computation deliberately omits. Budgets, gates, commitment, abstention, and refusal all compensate for that gap.
+
+\section{Part II: Control Systems Before Intelligence}
+
+The first systems that resemble modern agents did not reason symbolically, learn
+from data, or optimize explicit objectives. They regulated physical processes.
+Their primary concern was not intelligence but stability. This historical fact is
+easy to overlook, yet it explains why many contemporary agent failures look less
+like reasoning errors and more like control failures.
+
+Control systems were designed to operate continuously, under uncertainty, and in
+the presence of noise. They sensed state, acted on the environment, and observed
+the consequences of those actions. Crucially, they did so without assuming perfect
+models or complete information. These properties place control systems much closer
+to deployed agents than to classical algorithms.
+
+The canonical example is Watt’s centrifugal governor, which regulated steam engine
+speed via mechanical feedback. The governor continuously adjusted fuel input based
+on observed rotational velocity, stabilizing the system without computing an
+optimal solution. The design objective was not maximum efficiency but bounded
+behavior \cite{bennett1979history}. Overshoot and oscillation were treated as
+failures even if average performance was high.
+
+This emphasis on stability introduced a key distinction. Optimality is secondary
+to safety. A controller that produces slightly suboptimal output but remains
+stable is preferable to one that achieves higher average performance while
+occasionally destabilizing the system. This trade-off reappears in agent design as
+abstention, refusal, and conservative gating. Systems that always act aggressively
+fail less often in simulations but more often in production.
+
+Control theory formalized these ideas through feedback loops. A controller observes
+the current state, compares it to a desired operating region, and applies a
+corrective action. Importantly, the controller does not assume that its actions
+will have the intended effect. It continuously corrects based on observed
+outcomes. This contrasts sharply with planning-centric agent designs that assume
+execution follows intention unless proven otherwise.
+
+Another critical contribution of control theory is the treatment of delay and
+latency as first-class concerns. Delayed feedback can destabilize an otherwise
+sound controller. As a result, control systems are often deliberately conservative,
+trading responsiveness for stability. This logic directly contradicts the
+impulse to speculate aggressively in agent systems without accounting for commit
+latency or verification delay.
+
+Cybernetics generalized these ideas beyond mechanical systems. Wiener emphasized
+that intelligent behavior emerges from feedback, not from complex internal
+representation alone \cite{wiener1948cybernetics}. Systems must be evaluated by
+their trajectories, not by isolated outputs. A system that occasionally produces
+excellent responses but diverges over time is inferior to one that behaves
+predictably within bounds.
+
+Notably, early control systems treated failure as inevitable. Noise, drift, and
+disturbance were expected. Controllers were therefore designed to degrade
+gracefully rather than to achieve perfect performance. This assumption is absent
+from many modern agent designs, which implicitly assume that reasoning failures are
+rare and that recovery is always possible.
+
+The contrast between control systems and symbolic AI is instructive. Control
+systems act continuously, assume uncertainty, and prioritize stability. Symbolic
+AI systems plan discretely, assume correct execution, and optimize objectives.
+Modern agents inherit characteristics of both, but failures arise when the latter
+assumptions dominate.
+
+When agents are designed without explicit feedback control, they behave like open-
+loop systems. Actions are chosen based on internal reasoning and executed with
+minimal correction. In environments with irreversible effects, such designs are
+fragile. Small errors accumulate until recovery is impossible.
+
+The control-theoretic perspective therefore introduces several primitives that
+reappear throughout this book, such as explicit feedback, bounded response, conservative
+action, and stability over optimality. These primitives are not add-ons. They are
+preconditions for safe operation in uncertain environments.
+
+Nobody is suggesting you build your agent as a PID controller. That is the standard industrial feedback controller, which corrects using the present error, its accumulated history, and its rate of change. The transferable
+lesson is about ordering. Anything that acts repeatedly on the world has to be
+designed as a control system first and an intelligent one second. Reverse that
+order and you get what the field keeps producing, systems that demo beautifully
+and misbehave the moment they are embedded in a real process with real feedback
+delays.
+
+\section{Part III: Planning Systems and the Execution Gap}
+
+Classical AI approached agency through planning. An agent was modeled as a system that constructs a plan, meaning a sequence of actions leading from an initial state to a goal state, and then executes it. This formulation made reasoning explicit and
+symbolic, but it embedded assumptions about execution that fail in real
+environments.
+
+Early planning systems such as STRIPS described actions by their preconditions and effects. They assumed deterministic actions, complete state observability, and negligible execution cost \cite{fikes1971strips}. A plan
+was correct if, when executed exactly as specified, it reached the goal state.
+Execution was treated as a mechanical process whose only responsibility was to
+follow the plan.
+
+This separation between planning and execution created a structural blind spot.
+Plans were optimized for logical correctness, not for robustness under deviation.
+Unexpected events invalidated plans, requiring replanning from scratch. In
+environments where deviation is common, this leads to continual replanning and
+rapid cost escalation.
+
+The assumption that execution is cheap is particularly damaging. Planning systems
+implicitly authorize arbitrary sequences of actions without regard to cost,
+latency, or side effects. When such systems are embedded in real environments,
+verification, retries, and recovery actions accumulate along execution traces,
+often dominating total cost.
+
+The execution gap widens further when plans are long-horizon. Errors early in a
+plan propagate forward, constraining later options. Because planning systems
+evaluate correctness at the end of execution, they provide no mechanism for early
+intervention when a plan is becoming unsafe or unaffordable.
+
+Attempts to repair this gap often introduced monitoring and replanning. The agent
+would observe discrepancies between expected and actual state and trigger a new
+planning phase. While this improves logical correctness, it does not address the
+underlying cost structure. Replanning itself consumes resources, and repeated
+monitor–replan cycles can place the system on an expensive critical path.
+
+A deeper issue is that planning systems conflate intention with authorization.
+Producing a plan implicitly authorizes its actions. There is no intermediate
+decision point at which actions can be refused, deferred, or bounded based on
+policy, cost, or risk. Once a plan is accepted, execution proceeds unless a failure
+is detected.
+
+This model is incompatible with environments where actions are irreversible or
+policy-constrained. An action that violates a safety constraint cannot be undone
+by replanning. An action that exhausts a budget cannot be recovered by generating a
+new plan.
+
+The reliance on idealized world models exacerbates these problems. Planning systems
+assume that all relevant preconditions and effects are known and encoded. In real
+systems, preconditions are often probabilistic, hidden, or adversarial. Plans
+constructed under incomplete models appear valid but fail at execution time in
+systematic ways.
+
+The planning literature gradually recognized these limitations, introducing
+contingent planning, execution monitoring, and replanning under uncertainty.
+However, these extensions retained the core assumption that planning is the
+primary locus of control. Execution remained subordinate.
+
+Modern agent systems often repeat this pattern. Large language models generate
+plans or chains of reasoning, which are then executed by tools. Failures are
+attributed to poor reasoning rather than to the absence of explicit execution
+control. Verification and safety checks are bolted on after the fact, leading to
+cascades and brittle behavior.
+
+Blaming the planner here is a diagnostic error. The execution gap opens because
+execution was treated as a detail to be handled later, and it closes only when the
+system makes control decisions at execution time, including act, verify, abstain, or refuse.
+Those four decisions depend on what the world looks like at the moment of acting,
+which is information a plan built in advance does not contain. Chapter~\ref{ch:gates}
+is entirely about deriving them.
+
+This book adopts the opposite ordering. Plans and proposals are treated as
+tentative. Authorization, cost, and policy are enforced at execution time, not
+assumed at planning time. The mechanisms introduced in later chapters, gates,
+budgets, and commit protocols, exist to close the execution gap that planning-based
+agent models leave open.
+
+\section{Part IV: Learning Systems and Soft Constraints}
+
+Reinforcement learning reframed agents as systems that learn by interacting with an
+environment, selecting actions to maximize cumulative reward
+\cite{sutton2018reinforcement}. This formulation addressed a core limitation of
+classical planning. It treated action and consequence as inseparable. However, it
+introduced a different abstraction gap, one that becomes critical in deployed
+agent systems.
+
+The defining move of reinforcement learning is the reduction of all objectives to
+a scalar reward. Performance, safety, cost, and policy compliance are encoded, if
+at all, as components of a single objective function. This reduction is convenient
+for optimization, but it collapses distinctions that matter operationally. In
+particular, it replaces hard constraints with soft trade-offs.
+
+In a reward-based formulation, violating a safety constraint is not categorically
+forbidden; it is merely assigned a large negative reward. Whether the agent
+violates the constraint becomes a matter of optimization rather than admissibility.
+This is acceptable in simulated environments where violations can be sampled,
+averaged, and penalized. It is unacceptable in environments where violations are
+irreversible or catastrophic.
+
+A related consequence is the averaging away of rare failures. Reinforcement
+learning optimizes expected return. Low-probability, high-impact failures
+contribute little to the expectation unless explicitly amplified. As a result,
+policies that are optimal in expectation may still produce unacceptable tail
+behavior. This phenomenon is well documented in safety-critical domains, where
+systems perform well until a rare event triggers disproportionate damage
+\cite{amodei2016concrete}.
+
+Attempts to address these issues introduced constrained Markov decision processes,
+which separate rewards from constraints \cite{altman1999constrained}. While this
+formalism restores the distinction between objectives and constraints, it does not
+eliminate the reliance on expectation. Constraints are typically enforced in
+expectation or on average over trajectories, not at every step.
+
+For agents that act in the world, step-wise constraint enforcement is often
+required. An action that violates a policy cannot be justified by compensating
+future rewards. The action must simply not occur. This requirement lies outside
+the expressive scope of standard reinforcement learning formulations.
+
+Another limitation arises from the treatment of cost. In many learning systems,
+cost is incorporated as a negative reward. This encourages cost-efficient behavior
+on average but provides no mechanism for enforcing hard budgets. An agent may
+learn to respect cost constraints most of the time while still occasionally
+exhausting its budget. In operational systems, such occasional violations are
+unacceptable.
+
+Learning systems also assume that policy improvement is the primary path to
+correctness. Failures are treated as data points from which the agent can learn.
+This assumption presumes that failures are survivable and that the system can
+continue operating after them. Agents with real authority do not enjoy this
+luxury. Some failures terminate the system or trigger irreversible consequences,
+leaving no opportunity for learning.
+
+Modern agent architectures often combine learned policies with heuristic guards
+and filters. While this improves safety in practice, it obscures responsibility.
+When a system fails, it is unclear whether the failure arose from the learned
+policy, the reward specification, or the surrounding control logic. This
+entanglement complicates analysis and certification.
+
+The problem is where the learning sits. Learning is excellent at improving proposals. It suggests which actions might work, which evidence looks relevant, and which plans are plausible. It is a poor sole mechanism for enforcing an invariant, a budget, or a policy. Proposals are allowed to be wrong sometimes. Enforcement is
+not.
+
+This book therefore treats learning as a proposal mechanism rather than as a
+control mechanism. Learned components generate candidates. Control logic, gates,
+budgets, and commit protocols, determines what is executed. This separation
+restores hard constraints without discarding the benefits of learning.
+
+The historical lesson is that reward maximization alone is an insufficient
+foundation for agency in real environments. Systems that rely on soft constraints
+inevitably discover the constraints they violated only after the violation has
+occurred. Agents that must operate safely cannot afford this mode of discovery.
+
+\section{Part V: Commitment Is a Systems Problem}
+
+The need for explicit commitment did not arise in artificial intelligence. It
+arose in distributed systems, where computation interacts with shared state,
+partial failure, and irreversible effects. The solutions developed in this domain
+address problems that modern agent systems now encounter in different form.
+
+Early distributed systems exposed a fundamental mismatch between computation and
+action. Operations that appeared local from the perspective of a program had
+global effects on shared state. Partial failure made it impossible to assume that
+an operation either completed fully or not at all. This invalidated the implicit
+reversibility assumed by classical computation.
+
+Transaction processing systems responded by separating execution from commitment.
+Two-phase commit introduced a protocol in which participants first prepare to
+commit and only later make changes durable \cite{gray1978notes}. This separation
+allowed systems to reason about tentative actions without exposing irreversible
+effects prematurely. Crucially, commitment became an explicit, coordinated step
+rather than an implicit consequence of execution.
+
+What the transaction-processing community worked out, at some expense, is that
+commitment is a systems-level property. It depends on coordination among
+participants, on durability, and on a defined story for what happens when a
+participant disappears mid-protocol. Each participant can be locally correct and
+the system can still commit at the wrong moment and lose money.
+
+That result transfers directly to agents invoking tools, editing configurations, or
+kicking off external processes, and Chapter~\ref{ch:speculation} spends its length
+on it.
+
+Distributed systems also normalized failure. Nodes crash, messages are lost, and
+timeouts occur routinely. As a result, correctness conditions were reformulated to
+account for partial progress and aborted execution. Systems were designed to make
+failure visible and manageable rather than exceptional.
+
+Admission control provides a complementary lesson. Systems learned to reject work
+early when resources were insufficient, rather than accepting work and failing
+later. Refusal became a stability mechanism. A system that says “no” preserves
+overall correctness better than one that says “yes” and collapses under load.
+
+This runs against the instinct that a system should accept whatever work it can.
+Operators learned otherwise the hard way. Unbounded acceptance produces cascading
+failure, where the overloaded component's slowness becomes its upstream's queue
+becomes an outage. Agents without an explicit refusal path inherit the whole
+pattern, and Chapter~\ref{ch:gates} promotes refusal to a first-class outcome for
+exactly this reason.
+
+Congestion control makes the same point in a different register. TCP reads packet
+loss as an instruction to slow down \cite{jacobson1988congestion}. A sender that
+responds to failure by trying harder degrades the network for everyone, itself
+included; a sender that backs off gets more throughput over any interval that
+matters. Restraint is the throughput strategy. An agent that retries a failing tool
+faster and faster is rediscovering congestion collapse on someone else's API.
+
+Security systems further refined the notion of authorized action. Capability-based
+security replaced ambient authority with explicit rights
+\cite{saltzer1975protection}. Possession of a capability grants permission to act;
+absence forbids it. Intent, reasoning, or good faith are irrelevant.
+
+This model aligns closely with agent tool use. An agent should not execute an
+action because it believes the action is reasonable. It should execute an action
+only if it possesses the explicit capability to do so. Authorization precedes
+reasoning.
+
+Look at what these systems have in common. Execution is tentative. Commitment is
+explicit. Refusal is routine. Failure is expected and planned for. None of them
+optimize the best case; all of them bound the worst case, which is the trade you
+make when other people depend on you.
+
+Agent systems keep rediscovering these ideas one at a time and under different
+names. A verification step is a prepare phase. A tool wrapper is a capability
+check. A budget cap is admission control. A retry limit is backoff. Discovered
+piecemeal and wired in ad hoc, they interact badly and fail in combination.
+Specified explicitly, they compose.
+
+Commitment, in particular, cannot be inferred from intent. It has to be earned
+through protocol, and an agent that acts without commitment semantics has quietly assumed the Turing model in an environment where it does not hold. That model presumes disposable state, restartable execution, and no external consequences.
+
+The last year has supplied an unusually literal demonstration. Agents built on
+speculate-then-abort designs turned out to leave the aborted branch resident in the
+serving session's key/value cache, where the model continues to attend to it, so a
+branch the application believes it discarded goes on shaping behavior
+\cite{abortedkv2026}. Checkpoint-and-rollback machinery, added for exactly this
+kind of safety, has itself been shown to be attackable \cite{saferesume2026}. Both
+findings say the same thing the transaction community said in the 1970s. An abort
+that is not complete is not an abort, and completeness is a property you engineer
+rather than assume.
+
+This book takes the systems view throughout. Actions are proposed, evaluated, and
+then committed through mechanisms you can point at. Refusal and abstention are
+outcomes with their own thresholds. Commitment waits until the system can justify
+it. None of this is conservatism for its own sake. It is what correctness costs
+once actions are irreversible and failure is ordinary.
+
+% ============================================================
+% Bibliography: Historical Foundations of Control and Commitment
+\section{Fallacies and Pitfalls}
+
+\textbf{Fallacy. This is all just history.} Every mechanism in this chapter is
+re-derived, badly, by teams that did not know it existed. The cost of not reading
+it is measured in incidents, not in ignorance.
+
+\textbf{Fallacy. Agents are a new kind of system.} They are a new kind of
+\emph{component} inside a very old kind of system, one that acts on shared
+state, under uncertainty, with irreversible effects.
+
+\textbf{Fallacy. The classical model applies because the code is classical.} The
+Turing model assumes disposable state, restartable execution, and no external
+consequence. An agent violates all three, and inherits none of the guarantees.
+
+\textbf{Fallacy. Refusing work is a degraded mode.} Admission control exists
+because unbounded acceptance produces cascading failure. Saying no is how a
+system stays available.
+
+\textbf{Pitfall. Borrowing a mechanism without its assumptions.} Two-phase commit
+assumes participants that can prepare and hold. Optimistic concurrency assumes
+rare conflicts. A mechanism transplanted past its assumptions fails silently and
+looks like the agent's fault.
+
+\textbf{Pitfall. Reading control theory as a metaphor.} Feedback, bounded
+response, and stability margins are quantitative properties. Used as vocabulary
+rather than as design constraints, they explain failures without preventing them.
+
+\section{Summary}
+
+Five traditions, and what each one hands you.
+
+Classical computation gave us correctness at termination, which is the wrong
+frame for a system that is failing when it halts. It also gave us cost as an
+asymptotic comparison rather than an absolute limit, which is why budget
+exhaustion still gets filed as a performance issue instead of a correctness
+failure.
+
+Control theory contributed feedback, bounded response, and the preference for
+stability over optimality, and the ordering claim that anything acting
+repeatedly on the world is a control system before it is an intelligent one.
+
+Planning research found the execution gap, namely a plan built in advance cannot contain
+the information needed to decide, at the moment of acting, whether to act at all.
+
+Learning research showed where learning belongs. It is excellent at proposing and
+unsuitable as the sole enforcer of an invariant, because proposals may be wrong
+and enforcement may not.
+
+Distributed systems and transaction processing supplied the rest, such as execution as
+tentative, commitment as an explicit protocol, refusal as a stability mechanism,
+backoff as the throughput strategy, and capability as the basis of authorization.
+
+The through-line is that every one of these disciplines converged on bounding the
+worst case rather than optimizing the best one, and did so after paying for the
+alternative.
+
+\section*{Exercises}
+
+\begin{enumerate}
+\item Take a failure you have seen in an agent system and locate it in one of the
+five traditions above. Name the mechanism that discipline would have applied.
+
+\item TCP treats packet loss as a signal to slow down. Describe an agent retry
+policy built on the same principle, and state what signal plays the role of
+packet loss.
+
+\item Admission control rejects work when resources are insufficient rather than
+accepting and failing later. Write the admission test for an agent that must
+reserve budget for a mandatory finishing step.
+
+\item The execution gap says control decisions cannot be derived from a plan
+alone. Give a concrete task where a correct plan still requires a runtime
+decision to act, verify, abstain, or refuse, and say which of the four applies.
+
+\item Two-phase commit separates prepare from commit. Map its two phases onto an
+agent that proposes a database migration, and identify what plays the role of a
+participant that disappears mid-protocol.
+\end{enumerate}
+
+\section*{Bibliographic Notes}
+
+The termination-based notion of correctness originates with Turing
+\cite{turing1936computable}; its mismatch with continuously operating systems is
+the starting point for the reactive-systems literature.
+
+Control theory's contribution here is Wiener's cybernetics \cite{wiener1948} and
+the feedback tradition that followed; the stability-over-optimality preference is
+standard in any control text and is the part most often lost in translation to
+software.
+
+Classical planning is represented by STRIPS \cite{fikes1971strips}; the execution
+gap it exposes was addressed by later work on reactive and contingent planning.
+Sutton and Barto \cite{sutton2018reinforcement} cover the learning tradition,
+including why penalty terms are a poor substitute for hard constraints.
+
+The transaction-processing lineage runs through Gray's work on commit protocols
+\cite{gray1978notes} and the broader treatment in \cite{gray1992transaction};
+sagas for long-running transactions are due to Garcia-Molina and Salem
+\cite{garciamolina1987sagas}. Congestion control as restraint-for-throughput is
+Jacobson \cite{jacobson1988congestion}. Capability-based authorization derives
+from Saltzer and Schroeder \cite{saltzer1975protection}.
+
+The two contemporary results cited in the closing section, incomplete abort
+through retained cache state \cite{abortedkv2026} and the attackability of
+checkpoint/rollback machinery \cite{saferesume2026}, are the clearest recent
+demonstrations that these old lessons are still being relearned.
+
+% ============================================================
+
+\section*{Bibliography}
+
+\begin{thebibliography}{20}
+
+\bibitem{turing1936computable}
+A.~M. Turing.
+\newblock On computable numbers, with an application to the Entscheidungsproblem.
+\newblock \emph{Proceedings of the London Mathematical Society}, 42(2):230--265,
+1936.
+
+\bibitem{knuth1997art}
+D.~E. Knuth.
+\newblock \emph{The Art of Computer Programming, Volume 1: Fundamental Algorithms}.
+\newblock Addison--Wesley, 3rd edition, 1997.
+
+\bibitem{corbato1962experimental}
+F.~J. Corbató, M.~M. Daggett, and R.~C. Daley.
+\newblock An experimental time-sharing system.
+\newblock \emph{Proceedings of the AFIPS Fall Joint Computer Conference}, 1962.
+
+\bibitem{bennett1979history}
+S.~Bennett.
+\newblock \emph{A History of Control Engineering, 1800--1930}.
+\newblock IEE Control Engineering Series, 1979.
+
+\bibitem{wiener1948cybernetics}
+N.~Wiener.
+\newblock \emph{Cybernetics. Or Control and Communication in the Animal and the
+Machine}.
+\newblock MIT Press, 1948.
+
+\bibitem{fikes1971strips}
+R.~E. Fikes and N.~J. Nilsson.
+\newblock STRIPS: A new approach to the application of theorem proving to problem
+solving.
+\newblock \emph{Artificial Intelligence}, 2(3--4):189--208, 1971.
+
+\bibitem{sutton2018reinforcement}
+R.~S. Sutton and A.~G. Barto.
+\newblock \emph{Reinforcement Learning. An Introduction}.
+\newblock MIT Press, 2nd edition, 2018.
+
+\bibitem{altman1999constrained}
+E.~Altman.
+\newblock \emph{Constrained Markov Decision Processes}.
+\newblock Chapman \& Hall/CRC, 1999.
+
+\bibitem{amodei2016concrete}
+D.~Amodei, C.~Olah, J.~Steinhardt, P.~Christiano, J.~Schulman, and D.~Mané.
+\newblock Concrete problems in AI safety.
+\newblock \emph{arXiv:1606.06565}, 2016.
+
+\bibitem{gray1978notes}
+J.~Gray.
+\newblock Notes on data base operating systems.
+\newblock In \emph{Operating Systems. An Advanced Course}, Springer, 1978.
+
+\bibitem{jacobson1988congestion}
+V.~Jacobson.
+\newblock Congestion avoidance and control.
+\newblock \emph{ACM SIGCOMM}, 1988.
+
+\bibitem{saltzer1975protection}
+J.~H. Saltzer and M.~D. Schroeder.
+\newblock The protection of information in computer systems.
+\newblock \emph{Proceedings of the IEEE}, 63(9):1278--1308, 1975.
+
+
+\bibitem{abortedkv2026}
+Guijia Zhang and Harry Yang.
+``Aborted but Not Forgotten: KV-Cache Retention Breaks Rollback Consistency in Language Agents.''
+arXiv:2608.15939, 2026.
+
+\bibitem{saferesume2026}
+Guanlong Wu et al.
+``Safe to Resume? Breaking Execution Continuity of Agent Execution via Rollback.''
+arXiv:2608.29381, 2026.
+\bibitem{garciamolina1987sagas}
+H. Garcia-Molina and K. Salem.
+\newblock Sagas.
+\newblock In {\em ACM SIGMOD}, 1987.
+
+\bibitem{gray1992transaction}
+J. Gray and A. Reuter.
+\newblock {\em Transaction Processing: Concepts and Techniques}.
+\newblock Morgan Kaufmann, 1992.
+
+\bibitem{wiener1948}
+N.~Wiener.
+\newblock \emph{Cybernetics. Or Control and Communication in the Animal and the Machine}.
+\newblock MIT Press, 1948.
+
+\end{thebibliography}
+% ============================================================

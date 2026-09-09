@@ -388,6 +388,7 @@ ul.toc li.part { margin-top: 1.4em; font-family: Verdana, Arial, sans-serif; fon
 .enumerate-bib { font-size: 0.7em; }
 .enumerate-bib li { margin-bottom: 0.35em; line-height: 1.35; }
 hr { border: 0; border-top: 1px solid #999; }
+.counter img { vertical-align: middle; margin-left: 0.3em; }
 .smallcaps { font-variant: small-caps; }
 """
 
@@ -434,7 +435,8 @@ def page(title, desc, body_html, prev, nxt, canonical, extra_head="", jsonld=Non
 <div id="page">
 <div id="top"><span class="book"><a href="index.html">{BOOK_TITLE}</a></span>: {html.escape(SUBTITLE)}<br>{navs}</div>
 {body_html}
-<div id="bottom">{navs}<br>&copy; {YEAR} {AUTHOR}. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
+<div id="bottom">{navs}<br>&copy; {YEAR} {AUTHOR}. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.<br>
+<span class="counter">Visitors: <img src="https://hits.sh/krimler.github.io/agent-algorithmics.svg?label=visitors&amp;color=1f5ac4" alt="visitor counter" height="20"></span></div>
 </div>
 {MATHJAX}
 </body>

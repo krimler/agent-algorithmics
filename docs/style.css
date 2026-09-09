@@ -33,4 +33,5 @@ ul.toc li.part { margin-top: 1.4em; font-family: Verdana, Arial, sans-serif; fon
 .enumerate-bib { font-size: 0.7em; }
 .enumerate-bib li { margin-bottom: 0.35em; line-height: 1.35; }
 hr { border: 0; border-top: 1px solid #999; }
+.counter img { vertical-align: middle; margin-left: 0.3em; }
 .smallcaps { font-variant: small-caps; }

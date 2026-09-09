@@ -3,14 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chapter 8: Speculation, Parallelism, and Commit Protocols — Agent Algorithmics</title>
+<title>Chapter 8: Speculation, Parallelism, and Commit Protocols | Agent Algorithmics</title>
 <meta name="description" content="Watch an agent work and most of what you see is waiting.">
 <meta name="author" content="Madhava Gaikwad">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="book">
-<meta property="og:title" content="Chapter 8: Speculation, Parallelism, and Commit Protocols — Agent Algorithmics">
+<meta property="og:title" content="Chapter 8: Speculation, Parallelism, and Commit Protocols | Agent Algorithmics">
 <meta property="og:description" content="Watch an agent work and most of what you see is waiting.">
 <meta property="og:url" content="https://krimler.github.io/agent-algorithmics/08-speculation-parallelism-and-commit-protocols.html">
+<meta property="og:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<meta property="og:site_name" content="Agent Algorithmics">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chapter 8: Speculation, Parallelism, and Commit Protocols | Agent Algorithmics">
+<meta name="twitter:description" content="Watch an agent work and most of what you see is waiting.">
+<meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/08-speculation-parallelism-and-commit-protocols.html">
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Speculation, Parallelism, and Commit Protocols", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 8, "url": "https://krimler.github.io/agent-algorithmics/08-speculation-parallelism-and-commit-protocols.html"}</script>
@@ -18,7 +25,7 @@
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="07-action-selection-under-budgets.html" rel="prev">&laquo; Action Selection Under Budgets</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="09-risk-aware-gates-verification-abstention-refusal.html" rel="next">Risk-Aware Gates: Verification, Abstention, Refusal &raquo;</a></div>
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="07-action-selection-under-budgets.html" rel="prev">&laquo; Action Selection Under Budgets</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="09-risk-aware-gates-verification-abstention-refusal.html" rel="next">Risk-Aware Gates: Verification, Abstention, Refusal &raquo;</a></div>
 <h1 id="ch:speculation"><span class="part">Part II: Control and Commitment</span>Chapter 8. Speculation, Parallelism, and Commit Protocols</h1><p>Watch an agent work and most of what you see is waiting.</p>
 <p>The default loop runs observe, decide, act, observe, decide. It is safe, because every decision is made with the latest evidence. It is also almost entirely idle. Ten steps at five seconds each is fifty seconds, and for most of that time the model is blocked on a tool that has no idea anyone is waiting. Users leave and service-level agreements break. The work was never the bottleneck; the ordering was.</p>
 <p>This chapter develops three techniques for breaking the sequential bottleneck. <em>Speculation</em> executes an action before it is known whether the result will be needed. <em>Parallelism</em> executes several actions that are known to be needed at the same time. <em>Commit protocols</em> decide when speculative or parallel results become permanent.</p>
@@ -124,7 +131,7 @@
 <h3 id="dependency-analysis">8.2.2 Dependency Analysis</h3>
 <p>Not all tool calls are independent. A compiler-style analysis identifies data dependencies, and the scheduling problem is classical: given a dependency graph, execute tasks in topological order, batching all currently ready tasks.</p>
 <figure>
-<img src="figures/08-speculation-parallelism-and-commit-protocols-alg1-035a1f67a1.png" />
+<img src="figures/08-speculation-parallelism-and-commit-protocols-alg1-035a1f67a1.png" alt="figure" loading="lazy">
 </figure>
 <p>The novelty in agents is that the dependency graph is often implicit in natural language and must be extracted by the planner. An error in the analysis produces either unnecessary serialization (correct and slow) or incorrect parallel execution (fast and wrong). A good planner behaves like a cautious compiler and serializes when uncertain, while over-serialization defeats the purpose; planners do best when tasks are expressed in a structured format with typed tool signatures and explicit inputs and outputs rather than as free-form instructions.</p>
 <h3 id="bounding-parallelism">8.2.3 Bounding Parallelism</h3>

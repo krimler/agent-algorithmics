@@ -418,6 +418,13 @@ def page(title, desc, body_html, prev, nxt, canonical, extra_head="", jsonld=Non
 <meta property="og:title" content="{html.escape(title)}">
 <meta property="og:description" content="{html.escape(desc)}">
 {('<meta property="og:url" content="' + canonical + '">') if canonical else ''}
+<meta property="og:image" content="{BASE_URL}/cover-front.jpg">
+<meta property="og:site_name" content="{BOOK_TITLE}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{html.escape(title)}">
+<meta name="twitter:description" content="{html.escape(desc)}">
+<meta name="twitter:image" content="{BASE_URL}/cover-front.jpg">
+<link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 {canon}
 <link rel="stylesheet" href="style.css">
 {ld}
@@ -425,7 +432,7 @@ def page(title, desc, body_html, prev, nxt, canonical, extra_head="", jsonld=Non
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">{BOOK_TITLE}</a></span> &mdash; {html.escape(SUBTITLE)}<br>{navs}</div>
+<div id="top"><span class="book"><a href="index.html">{BOOK_TITLE}</a></span>: {html.escape(SUBTITLE)}<br>{navs}</div>
 {body_html}
 <div id="bottom">{navs}<br>&copy; {YEAR} {AUTHOR}. Also available as a <a href="agent-algorithmics.pdf">PDF</a>.</div>
 </div>
@@ -463,16 +470,23 @@ for i, ch in enumerate(chapters):
         inner = re.sub(rf"<(/?)h{lvl}\b", rf"<\g<1>h{lvl + 1}", inner)
     # drop the empty paragraph holding the chapter label (the h1 carries the id)
     inner = re.sub(r'<p><span id="[^"]*" data-label="[^"]*"></span></p>\s*', "", inner, count=1)
+    # give every figure image an alt text taken from its caption
+    def altfix(m):
+        block = m.group(0)
+        cap = re.search(r"<figcaption[^>]*>(.*?)</figcaption>", block, re.S)
+        alt = re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", "", cap.group(1)))).strip() if cap else "figure"
+        return re.sub(r'<img src="([^"]+)"[^>]*>', lambda im: f'<img src="{im.group(1)}" alt="{html.escape(alt)}" loading="lazy">', block)
+    inner = re.sub(r"<figure>.*?</figure>", altfix, inner, flags=re.S)
     # bibliography enumerate gets a class for styling
     inner = re.sub(r'<ol[^>]*>(\s*<li><span id="ref-)', r'<ol class="enumerate-bib">\1', inner, count=1)
 
     heading = html.escape(tex_to_text(ch["title"]))
     if ch["number"]:
         h1 = f'<h1><span class="part">{html.escape(ch["part"] or "")}</span>Chapter {ch["number"]}. {heading}</h1>'
-        title = f"Chapter {ch['number']}: {tex_to_text(ch['title'])} — {BOOK_TITLE}"
+        title = f"Chapter {ch['number']}: {tex_to_text(ch['title'])} | {BOOK_TITLE}"
     else:
         h1 = f"<h1>{heading}</h1>"
-        title = f"{tex_to_text(ch['title'])} — {BOOK_TITLE}"
+        title = f"{tex_to_text(ch['title'])} | {BOOK_TITLE}"
     if ch["label"]:
         h1 = h1.replace("<h1>", f'<h1 id="{ch["label"]}">', 1)
 
@@ -510,6 +524,7 @@ for ch in chapters:
     items.append(f'<li><a href="{ch["file"]}">{label}{html.escape(tex_to_text(ch["title"]))}</a></li>')
 toc = f"""<h1>{BOOK_TITLE}<span class="part" style="text-transform:none;letter-spacing:0">{html.escape(SUBTITLE)}</span></h1>
 <p><i>{AUTHOR}</i></p>
+<img src="cover-front.jpg" alt="Front cover of Agent Algorithmics" style="float:right;width:38%;max-width:260px;margin:0 0 1em 1.5em;border:1px solid #999">
 <p>A textbook on building agents that stay within budget, take back what they
 can, refuse what they must, and leave a trace you can audit. Language models
 appear as components; the subject is the control structure around them.
@@ -521,11 +536,12 @@ Also available as a single <a href="agent-algorithmics.pdf">PDF</a>.</p>
 """
 index_ld = {"@context": "https://schema.org", "@type": "Book", "name": BOOK_TITLE,
             "alternativeHeadline": SUBTITLE, "author": {"@type": "Person", "name": AUTHOR},
-            "inLanguage": "en", "datePublished": YEAR}
+            "inLanguage": "en", "datePublished": YEAR, "image": f"{BASE_URL}/cover-front.jpg",
+            "numberOfPages": 304, "bookFormat": "https://schema.org/EBook"}
 if BASE_URL:
     index_ld["url"] = BASE_URL + "/"
 (OUT / "index.html").write_text(
-    page(f"{BOOK_TITLE} — {SUBTITLE}", f"{BOOK_TITLE}: {SUBTITLE}. A textbook by {AUTHOR}.",
+    page(f"{BOOK_TITLE}: {SUBTITLE}", f"{BOOK_TITLE}: {SUBTITLE}. A textbook by {AUTHOR}.",
          toc, None, (chapters[0]["file"], tex_to_text(chapters[0]["title"])),
          BASE_URL + "/" if BASE_URL else "", jsonld=index_ld),
     encoding="utf-8")
@@ -535,11 +551,12 @@ urls = [BASE_URL + "/"] + [f"{BASE_URL}/{c['file']}" for c in chapters] if BASE_
 if urls:
     (OUT / "sitemap.xml").write_text(
         '<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-        + "".join(f"  <url><loc>{html.escape(u)}</loc></url>\n" for u in urls) + "</urlset>\n",
+        + "".join(f"  <url><loc>{html.escape(u)}</loc><lastmod>{__import__('datetime').date.today().isoformat()}</lastmod></url>\n" for u in urls) + "</urlset>\n",
         encoding="utf-8")
     (OUT / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {BASE_URL}/sitemap.xml\n")
 else:
     (OUT / "robots.txt").write_text("User-agent: *\nAllow: /\n")
+(OUT / ".nojekyll").write_text("")
 pdf = ROOT / "main.pdf"
 if pdf.exists():
     shutil.copy(pdf, OUT / "agent-algorithmics.pdf")

@@ -3,14 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chapter 2: Mathematical Foundations — Agent Algorithmics</title>
+<title>Chapter 2: Mathematical Foundations | Agent Algorithmics</title>
 <meta name="description" content="This chapter assembles the mathematical tools that the rest of the book depends on. There are five of them: sequential decision making, constrained…">
 <meta name="author" content="Madhava Gaikwad">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="book">
-<meta property="og:title" content="Chapter 2: Mathematical Foundations — Agent Algorithmics">
+<meta property="og:title" content="Chapter 2: Mathematical Foundations | Agent Algorithmics">
 <meta property="og:description" content="This chapter assembles the mathematical tools that the rest of the book depends on. There are five of them: sequential decision making, constrained…">
 <meta property="og:url" content="https://krimler.github.io/agent-algorithmics/02-mathematical-foundations.html">
+<meta property="og:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<meta property="og:site_name" content="Agent Algorithmics">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chapter 2: Mathematical Foundations | Agent Algorithmics">
+<meta name="twitter:description" content="This chapter assembles the mathematical tools that the rest of the book depends on. There are five of them: sequential decision making, constrained…">
+<meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/02-mathematical-foundations.html">
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Mathematical Foundations", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 2, "url": "https://krimler.github.io/agent-algorithmics/02-mathematical-foundations.html"}</script>
@@ -18,7 +25,7 @@
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="01-terms-and-operational-definitions.html" rel="prev">&laquo; Terms and Operational Definitions</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="03-a-short-history-of-agents-control-and-commitment.html" rel="next">A Short History of Agents, Control, and Commitment &raquo;</a></div>
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="01-terms-and-operational-definitions.html" rel="prev">&laquo; Terms and Operational Definitions</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="03-a-short-history-of-agents-control-and-commitment.html" rel="next">A Short History of Agents, Control, and Commitment &raquo;</a></div>
 <h1 id="ch:math"><span class="part">Part I: Foundations</span>Chapter 2. Mathematical Foundations</h1><p>This chapter assembles the mathematical tools that the rest of the book depends on. There are five of them: sequential decision making, constrained optimization, probability and expectation, complexity analysis, and a small set of data structures. Each section opens with a puzzle that can be worked in one’s head, develops the idea on a small example, and only then states the formalism. A reader for whom a section’s puzzle is already routine can move to the next section; nothing here is required twice.</p>
 <p>Each tool earns its place by reappearing later. Sequential decision making underlies the action-selection and speculation machinery of Chapters <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a> and <a href="08-speculation-parallelism-and-commit-protocols.html#ch:speculation">8</a>. Constrained optimization is the language of Chapters <a href="05-cost-models-and-critical-paths.html#ch:cost">5</a> through <a href="07-action-selection-under-budgets.html#ch:action-selection">7</a>. Probability and expectation supply the thresholds of Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a>. Complexity analysis and data structures decide whether the memory and retrieval designs of Chapters <a href="10-memory-state-and-forgetting.html#ch:memory">10</a> and <a href="11-retrieval-and-evidence-management.html#ch:retrieval">11</a> are practical at all.</p>
 <p>The chapter that follows this one, on the history of the ideas, is the one place in the book that can be read out of order. It supplies context, and nothing later depends on it.</p>

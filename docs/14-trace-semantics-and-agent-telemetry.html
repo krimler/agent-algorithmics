@@ -3,14 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chapter 14: Trace Semantics and Agent Telemetry — Agent Algorithmics</title>
+<title>Chapter 14: Trace Semantics and Agent Telemetry | Agent Algorithmics</title>
 <meta name="description" content="An agent fails in production. The input, the output, and the bill are available. The forty decisions in between happened, produced the failure, and left…">
 <meta name="author" content="Madhava Gaikwad">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="book">
-<meta property="og:title" content="Chapter 14: Trace Semantics and Agent Telemetry — Agent Algorithmics">
+<meta property="og:title" content="Chapter 14: Trace Semantics and Agent Telemetry | Agent Algorithmics">
 <meta property="og:description" content="An agent fails in production. The input, the output, and the bill are available. The forty decisions in between happened, produced the failure, and left…">
 <meta property="og:url" content="https://krimler.github.io/agent-algorithmics/14-trace-semantics-and-agent-telemetry.html">
+<meta property="og:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<meta property="og:site_name" content="Agent Algorithmics">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chapter 14: Trace Semantics and Agent Telemetry | Agent Algorithmics">
+<meta name="twitter:description" content="An agent fails in production. The input, the output, and the bill are available. The forty decisions in between happened, produced the failure, and left…">
+<meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/14-trace-semantics-and-agent-telemetry.html">
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Trace Semantics and Agent Telemetry", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 14, "url": "https://krimler.github.io/agent-algorithmics/14-trace-semantics-and-agent-telemetry.html"}</script>
@@ -18,7 +25,7 @@
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="13-alignment-policies-and-constraint-enforcement.html" rel="prev">&laquo; Alignment, Policies, and Constraint Enforcement</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="15-evaluation-stability-cost-and-behavioral-fidelity.html" rel="next">Evaluation: Stability, Cost, and Behavioral Fidelity &raquo;</a></div>
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="13-alignment-policies-and-constraint-enforcement.html" rel="prev">&laquo; Alignment, Policies, and Constraint Enforcement</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="15-evaluation-stability-cost-and-behavioral-fidelity.html" rel="next">Evaluation: Stability, Cost, and Behavioral Fidelity &raquo;</a></div>
 <h1 id="ch:traces"><span class="part">Part III: Observability and Evaluation</span>Chapter 14. Trace Semantics and Agent Telemetry</h1><p>An agent fails in production. The input, the output, and the bill are available. The forty decisions in between happened, produced the failure, and left no record.</p>
 <p>What follows is familiar. Someone proposes a prompt change. Someone else proposes a different model. Both are guesses, both are plausible, and neither can be evaluated, because the evidence that would settle the question was never written down. Fixes made in this environment are superstitious: the change ships, the failure stops recurring for a week, and nobody knows whether the two facts are related. Observability is what converts that argument into an investigation.</p>
 <p>Agent systems make observability harder than conventional services do. A typical microservice executes deterministic code paths with explicit control flow. An agent executes a stochastic program whose control flow is partly synthesized at runtime: it plans, chooses tools, retries, branches, and composes outputs from retrieved context. Its failures are often semantic rather than operational, so the system can be healthy by CPU and error-rate metrics and still be wrong, unsafe, or wasteful.</p>

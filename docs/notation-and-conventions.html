@@ -3,14 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Notation and Conventions — Agent Algorithmics</title>
+<title>Notation and Conventions | Agent Algorithmics</title>
 <meta name="description" content="You can skip this chapter and come back when a symbol surprises you. It is here so that when Chapter 9 writes \(B_t - R_t\) without comment, you know what…">
 <meta name="author" content="Madhava Gaikwad">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="book">
-<meta property="og:title" content="Notation and Conventions — Agent Algorithmics">
+<meta property="og:title" content="Notation and Conventions | Agent Algorithmics">
 <meta property="og:description" content="You can skip this chapter and come back when a symbol surprises you. It is here so that when Chapter 9 writes \(B_t - R_t\) without comment, you know what…">
 <meta property="og:url" content="https://krimler.github.io/agent-algorithmics/notation-and-conventions.html">
+<meta property="og:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<meta property="og:site_name" content="Agent Algorithmics">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Notation and Conventions | Agent Algorithmics">
+<meta name="twitter:description" content="You can skip this chapter and come back when a symbol surprises you. It is here so that when Chapter 9 writes \(B_t - R_t\) without comment, you know what…">
+<meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/notation-and-conventions.html">
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Notation and Conventions", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 0, "url": "https://krimler.github.io/agent-algorithmics/notation-and-conventions.html"}</script>
@@ -18,7 +25,7 @@
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="preface.html" rel="prev">&laquo; Preface</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="01-terms-and-operational-definitions.html" rel="next">Terms and Operational Definitions &raquo;</a></div>
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="preface.html" rel="prev">&laquo; Preface</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="01-terms-and-operational-definitions.html" rel="next">Terms and Operational Definitions &raquo;</a></div>
 <h1>Notation and Conventions</h1><p>You can skip this chapter and come back when a symbol surprises you. It is here so that when Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a> writes <span class="math inline">\(B_t - R_t\)</span> without comment, you know what both terms mean and why the subtraction matters.</p>
 <h2 class="unnumbered" id="time-and-execution">Time and Execution</h2>
 <p>Time is discrete, indexed <span class="math inline">\(t = 1, 2, \ldots\)</span>. An agent runs in steps, and at each step it observes, decides, and possibly acts. Wall-clock time appears separately when latency is the subject; until then, a “step” is one turn through that loop.</p>

@@ -3,14 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chapter 5: Cost Models and Critical Paths — Agent Algorithmics</title>
+<title>Chapter 5: Cost Models and Critical Paths | Agent Algorithmics</title>
 <meta name="description" content="The first surprising invoice is a rite of passage. An agent that cost pennies in testing bills four figures in its first production week, and the…">
 <meta name="author" content="Madhava Gaikwad">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="book">
-<meta property="og:title" content="Chapter 5: Cost Models and Critical Paths — Agent Algorithmics">
+<meta property="og:title" content="Chapter 5: Cost Models and Critical Paths | Agent Algorithmics">
 <meta property="og:description" content="The first surprising invoice is a rite of passage. An agent that cost pennies in testing bills four figures in its first production week, and the…">
 <meta property="og:url" content="https://krimler.github.io/agent-algorithmics/05-cost-models-and-critical-paths.html">
+<meta property="og:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<meta property="og:site_name" content="Agent Algorithmics">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chapter 5: Cost Models and Critical Paths | Agent Algorithmics">
+<meta name="twitter:description" content="The first surprising invoice is a rite of passage. An agent that cost pennies in testing bills four figures in its first production week, and the…">
+<meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/05-cost-models-and-critical-paths.html">
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Cost Models and Critical Paths", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 5, "url": "https://krimler.github.io/agent-algorithmics/05-cost-models-and-critical-paths.html"}</script>
@@ -18,7 +25,7 @@
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="04-formal-semantics-types-and-contracts.html" rel="prev">&laquo; Formal Semantics, Types, and Contracts</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="06-budget-aware-policies-and-horizon-estimation.html" rel="next">Budget-Aware Policies and Horizon Estimation &raquo;</a></div>
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="04-formal-semantics-types-and-contracts.html" rel="prev">&laquo; Formal Semantics, Types, and Contracts</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="06-budget-aware-policies-and-horizon-estimation.html" rel="next">Budget-Aware Policies and Horizon Estimation &raquo;</a></div>
 <h1 id="ch:cost"><span class="part">Part I: Foundations</span>Chapter 5. Cost Models and Critical Paths</h1><p>The first surprising invoice is a rite of passage. An agent that cost pennies in testing bills four figures in its first production week, and the postmortem reaches the same conclusion every time: nobody can say where the money went. The total is known; the feature, the user, and the step responsible are not.</p>
 <p>That is a measurement failure before it is an efficiency failure, and this chapter treats the measurement first.</p>
 <p>We begin with the token, work out how token usage compounds across prompts, retrieval, and multi-step execution, and decompose the total into components that respond to different fixes. We then turn to latency, which follows different rules: cost accumulates across everything the agent does, while latency accumulates only along the critical path. Confusing the two produces optimizations that make an agent cheaper and slower, or faster and ruinous.</p>

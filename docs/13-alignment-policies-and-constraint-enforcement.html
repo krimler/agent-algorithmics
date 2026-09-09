@@ -3,14 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chapter 13: Alignment, Policies, and Constraint Enforcement — Agent Algorithmics</title>
+<title>Chapter 13: Alignment, Policies, and Constraint Enforcement | Agent Algorithmics</title>
 <meta name="description" content="Tell a system to minimize response time and it can satisfy you completely by returning nothing, instantly.">
 <meta name="author" content="Madhava Gaikwad">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="book">
-<meta property="og:title" content="Chapter 13: Alignment, Policies, and Constraint Enforcement — Agent Algorithmics">
+<meta property="og:title" content="Chapter 13: Alignment, Policies, and Constraint Enforcement | Agent Algorithmics">
 <meta property="og:description" content="Tell a system to minimize response time and it can satisfy you completely by returning nothing, instantly.">
 <meta property="og:url" content="https://krimler.github.io/agent-algorithmics/13-alignment-policies-and-constraint-enforcement.html">
+<meta property="og:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<meta property="og:site_name" content="Agent Algorithmics">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chapter 13: Alignment, Policies, and Constraint Enforcement | Agent Algorithmics">
+<meta name="twitter:description" content="Tell a system to minimize response time and it can satisfy you completely by returning nothing, instantly.">
+<meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/13-alignment-policies-and-constraint-enforcement.html">
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Alignment, Policies, and Constraint Enforcement", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 13, "url": "https://krimler.github.io/agent-algorithmics/13-alignment-policies-and-constraint-enforcement.html"}</script>
@@ -18,7 +25,7 @@
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="12-capability-boundaries-and-secure-tool-use.html" rel="prev">&laquo; Capability Boundaries and Secure Tool Use</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="14-trace-semantics-and-agent-telemetry.html" rel="next">Trace Semantics and Agent Telemetry &raquo;</a></div>
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="12-capability-boundaries-and-secure-tool-use.html" rel="prev">&laquo; Capability Boundaries and Secure Tool Use</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="14-trace-semantics-and-agent-telemetry.html" rel="next">Trace Semantics and Agent Telemetry &raquo;</a></div>
 <h1 id="ch:alignment"><span class="part">Part II: Control and Commitment</span>Chapter 13. Alignment, Policies, and Constraint Enforcement</h1><p>Tell a system to minimize response time and it can satisfy you completely by returning nothing, instantly.</p>
 <p>That is the whole problem in one sentence. Optimization is literal. It amplifies the objective that was written, and the gap between that objective and the one that was meant is where every alignment failure lives. Nothing here requires the agent to be adversarial. An agent that maximizes ticket closure will close tickets without resolving them, and it will do so while being cooperative and well-intentioned throughout.</p>
 <p>This chapter treats alignment as engineering: policies as executable specifications, constraints as formal requirements, enforcement as runtime algorithms that run whether or not the model agrees with them. The organizing distinction is between behavior that is <em>encouraged</em> and behavior that is <em>enforced</em>. Training and prompting produce the first. Code produces the second, and only the second survives contact with an adversary, a distribution shift, or a context-compaction pass that summarized the safety instructions into oblivion.</p>
@@ -80,7 +87,7 @@ Rule   { id: RuleID, priority: Priority, conditions: List&lt;Condition&gt;,
 <p><em>Lexicographic ordering</em> assigns each policy a priority and lets the highest applicable policy win. It is deterministic, auditable, and easy to explain to a regulator; it handles genuine ties badly, since it always has an answer even when the answer is arbitrary. <em>Weighted aggregation</em> scores actions against weighted policies and takes the best total. It is flexible, and dangerous for safety constraints: a sufficiently high utility score can outvote a safety policy, which is precisely the property constraints exist to prevent. Weights are appropriate for preferences and never for invariants. <em>Constraint relaxation</em> handles the case where no action satisfies everything by relaxing the lowest-priority constraint until the feasible set is non-empty, and recording what was relaxed; this preserves the ability to act while making the compromise explicit. <em>Human escalation</em> defers irreducible conflicts; it is correct and expensive, and Chapter <a href="09-risk-aware-gates-verification-abstention-refusal.html#ch:gates">9</a> discusses the cost of over-escalation.</p>
 <h3 id="the-resolution-algorithm">13.5.3 The Resolution Algorithm</h3>
 <figure>
-<img src="figures/13-alignment-policies-and-constraint-enforcement-alg1-a7c213779f.png" />
+<img src="figures/13-alignment-policies-and-constraint-enforcement-alg1-a7c213779f.png" alt="figure" loading="lazy">
 </figure>
 <p>Two design choices in the algorithm carry most of its weight. Line 3 returns <span class="smallcaps">Deny</span> when no policy applies. Default-deny means that an action nobody anticipated is refused rather than permitted, so gaps in the policy set fail closed; the alternative fails open, and the actions nobody anticipated are exactly the ones an attacker constructs. The invariant loop runs before priority resolution. Invariants are a different kind of object from high-priority policies, and no accumulation of competing priorities may outvote one. Collapsing the two categories is the most common way a policy engine ends up permitting something it was built to forbid.</p>
 <h2 id="constitutional-ai-and-self-regulation">13.6 Constitutional AI and Self-Regulation</h2>

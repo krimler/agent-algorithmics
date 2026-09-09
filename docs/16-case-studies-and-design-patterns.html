@@ -3,14 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chapter 16: Case Studies and Design Patterns — Agent Algorithmics</title>
+<title>Chapter 16: Case Studies and Design Patterns | Agent Algorithmics</title>
 <meta name="description" content="Fourteen chapters of machinery raise the question a reader building something next week actually has: which parts are needed for this system?">
 <meta name="author" content="Madhava Gaikwad">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="book">
-<meta property="og:title" content="Chapter 16: Case Studies and Design Patterns — Agent Algorithmics">
+<meta property="og:title" content="Chapter 16: Case Studies and Design Patterns | Agent Algorithmics">
 <meta property="og:description" content="Fourteen chapters of machinery raise the question a reader building something next week actually has: which parts are needed for this system?">
 <meta property="og:url" content="https://krimler.github.io/agent-algorithmics/16-case-studies-and-design-patterns.html">
+<meta property="og:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<meta property="og:site_name" content="Agent Algorithmics">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chapter 16: Case Studies and Design Patterns | Agent Algorithmics">
+<meta name="twitter:description" content="Fourteen chapters of machinery raise the question a reader building something next week actually has: which parts are needed for this system?">
+<meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/16-case-studies-and-design-patterns.html">
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Case Studies and Design Patterns", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 16, "url": "https://krimler.github.io/agent-algorithmics/16-case-studies-and-design-patterns.html"}</script>
@@ -18,7 +25,7 @@
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="15-evaluation-stability-cost-and-behavioral-fidelity.html" rel="prev">&laquo; Evaluation: Stability, Cost, and Behavioral Fidelity</a> &nbsp;|&nbsp; <a href="index.html">Contents</a></div>
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="15-evaluation-stability-cost-and-behavioral-fidelity.html" rel="prev">&laquo; Evaluation: Stability, Cost, and Behavioral Fidelity</a> &nbsp;|&nbsp; <a href="index.html">Contents</a></div>
 <h1 id="ch:patterns"><span class="part">Part IV: Synthesis</span>Chapter 16. Case Studies and Design Patterns</h1><p>Fourteen chapters of machinery raise the question a reader building something next week actually has: which parts are needed for this system?</p>
 <p>This chapter answers with patterns and case studies. The patterns are reusable, and each comes with the conditions under which it stops working. The case studies are complete designs, worth reading less for their architectures than for the interactions: the places where two individually sensible components combine into something that violates a constraint neither of them knew about. The patterns and case studies draw on production systems deployed in 2025, including deep research agents, software engineering agents, and enterprise assistants, and cite specific architectures and their measured performance where possible.</p>
 <p>One theme runs through all of it: <em>constraint-aware composition</em>. Agents seldom fail because a component is weak. They fail at the seams. A retrieval step that is individually excellent consumes the budget that synthesis needed; a compaction pass that is individually correct removes a policy the gate assumed was present; two agents that each hold a valid lock deadlock on a shared file. The best architecture is almost always the simplest one that satisfies its constraints with margin, and margin is the operative word: a design that exactly meets its budget under median load has no answer for the 95th-percentile run.</p>

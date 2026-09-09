@@ -3,14 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chapter 4: Formal Semantics, Types, and Contracts — Agent Algorithmics</title>
+<title>Chapter 4: Formal Semantics, Types, and Contracts | Agent Algorithmics</title>
 <meta name="description" content="Consider a question that most teams cannot currently answer about their own agent: given its configuration, will it terminate? The question concerns the…">
 <meta name="author" content="Madhava Gaikwad">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="book">
-<meta property="og:title" content="Chapter 4: Formal Semantics, Types, and Contracts — Agent Algorithmics">
+<meta property="og:title" content="Chapter 4: Formal Semantics, Types, and Contracts | Agent Algorithmics">
 <meta property="og:description" content="Consider a question that most teams cannot currently answer about their own agent: given its configuration, will it terminate? The question concerns the…">
 <meta property="og:url" content="https://krimler.github.io/agent-algorithmics/04-formal-semantics-types-and-contracts.html">
+<meta property="og:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<meta property="og:site_name" content="Agent Algorithmics">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chapter 4: Formal Semantics, Types, and Contracts | Agent Algorithmics">
+<meta name="twitter:description" content="Consider a question that most teams cannot currently answer about their own agent: given its configuration, will it terminate? The question concerns the…">
+<meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/04-formal-semantics-types-and-contracts.html">
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Formal Semantics, Types, and Contracts", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 4, "url": "https://krimler.github.io/agent-algorithmics/04-formal-semantics-types-and-contracts.html"}</script>
@@ -18,7 +25,7 @@
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="03-a-short-history-of-agents-control-and-commitment.html" rel="prev">&laquo; A Short History of Agents, Control, and Commitment</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="05-cost-models-and-critical-paths.html" rel="next">Cost Models and Critical Paths &raquo;</a></div>
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="03-a-short-history-of-agents-control-and-commitment.html" rel="prev">&laquo; A Short History of Agents, Control, and Commitment</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="05-cost-models-and-critical-paths.html" rel="next">Cost Models and Critical Paths &raquo;</a></div>
 <h1 id="ch:semantics"><span class="part">Part I: Foundations</span>Chapter 4. Formal Semantics, Types, and Contracts</h1><p>Consider a question that most teams cannot currently answer about their own agent: given its configuration, will it terminate? The question concerns the configuration itself rather than the agent’s behavior on the cases that happened to be tried. The usual answer is a step limit, which is an admission that the question was never asked. A step limit says nothing about whether the agent halts; it says when to stop waiting.</p>
 <p>Chapter <a href="01-terms-and-operational-definitions.html#ch:terms">1</a> defined the vocabulary operationally, in terms of what a system must track and enforce. That is sufficient to build with and insufficient to prove anything. This chapter covers the formal side, which arrived late to agent work and then arrived quickly. Within the past year the field has acquired typed calculi for agent composition, process-calculus semantics for tool protocols, information-flow calculi for injection resistance, and contract frameworks that make resource bounds part of a specification rather than a runtime hope.</p>
 <p>The practical return is narrower than the theory suggests and still worth having. Formalization yields lint rules that catch structural errors before deployment, a precise statement of what a protocol translation loses, and a way to state what an agent is permitted to consume that a scheduler can check.</p>

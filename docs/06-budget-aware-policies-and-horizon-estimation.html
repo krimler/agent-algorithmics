@@ -3,14 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chapter 6: Budget-Aware Policies and Horizon Estimation — Agent Algorithmics</title>
+<title>Chapter 6: Budget-Aware Policies and Horizon Estimation | Agent Algorithmics</title>
 <meta name="description" content="Give an agent twice the budget and it will usually get no further. Often it gets no further at all.">
 <meta name="author" content="Madhava Gaikwad">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="book">
-<meta property="og:title" content="Chapter 6: Budget-Aware Policies and Horizon Estimation — Agent Algorithmics">
+<meta property="og:title" content="Chapter 6: Budget-Aware Policies and Horizon Estimation | Agent Algorithmics">
 <meta property="og:description" content="Give an agent twice the budget and it will usually get no further. Often it gets no further at all.">
 <meta property="og:url" content="https://krimler.github.io/agent-algorithmics/06-budget-aware-policies-and-horizon-estimation.html">
+<meta property="og:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<meta property="og:site_name" content="Agent Algorithmics">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chapter 6: Budget-Aware Policies and Horizon Estimation | Agent Algorithmics">
+<meta name="twitter:description" content="Give an agent twice the budget and it will usually get no further. Often it gets no further at all.">
+<meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/06-budget-aware-policies-and-horizon-estimation.html">
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Budget-Aware Policies and Horizon Estimation", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 6, "url": "https://krimler.github.io/agent-algorithmics/06-budget-aware-policies-and-horizon-estimation.html"}</script>
@@ -18,7 +25,7 @@
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="05-cost-models-and-critical-paths.html" rel="prev">&laquo; Cost Models and Critical Paths</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="07-action-selection-under-budgets.html" rel="next">Action Selection Under Budgets &raquo;</a></div>
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="05-cost-models-and-critical-paths.html" rel="prev">&laquo; Cost Models and Critical Paths</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="07-action-selection-under-budgets.html" rel="next">Action Selection Under Budgets &raquo;</a></div>
 <h1 id="ch:budgets"><span class="part">Part I: Foundations</span>Chapter 6. Budget-Aware Policies and Horizon Estimation</h1><p>Give an agent twice the budget and it will usually get no further. Often it gets no further at all.</p>
 <p>This is one of the more useful empirical findings of the past two years, and it deserves some attention, because it contradicts the natural assumption that resources are the binding constraint. A budget-unaware agent spends early on whatever looks locally promising, reaches a performance ceiling well before the budget is exhausted, and then spends the remainder on exploration that changes nothing. Doubling its allowance doubles the waste. Agents that can <em>see</em> their budget continue to convert additional resources into additional accuracy, and reach comparable accuracy on far less [<a href="#ref-bats2025">3</a>, <a href="#ref-budgettooluse2026">11</a>]. Figure <a href="#fig:budget-scaling">6.1</a> shows the shape of the two curves.</p>
 <figure id="fig:budget-scaling">

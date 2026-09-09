@@ -3,14 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chapter 7: Action Selection Under Budgets — Agent Algorithmics</title>
+<title>Chapter 7: Action Selection Under Budgets | Agent Algorithmics</title>
 <meta name="description" content="The cheapest possible agent takes no actions. It never overspends, never violates an invariant, never fabricates a citation, and never helps anyone. This…">
 <meta name="author" content="Madhava Gaikwad">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="book">
-<meta property="og:title" content="Chapter 7: Action Selection Under Budgets — Agent Algorithmics">
+<meta property="og:title" content="Chapter 7: Action Selection Under Budgets | Agent Algorithmics">
 <meta property="og:description" content="The cheapest possible agent takes no actions. It never overspends, never violates an invariant, never fabricates a citation, and never helps anyone. This…">
 <meta property="og:url" content="https://krimler.github.io/agent-algorithmics/07-action-selection-under-budgets.html">
+<meta property="og:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<meta property="og:site_name" content="Agent Algorithmics">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chapter 7: Action Selection Under Budgets | Agent Algorithmics">
+<meta name="twitter:description" content="The cheapest possible agent takes no actions. It never overspends, never violates an invariant, never fabricates a citation, and never helps anyone. This…">
+<meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/07-action-selection-under-budgets.html">
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Action Selection Under Budgets", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 7, "url": "https://krimler.github.io/agent-algorithmics/07-action-selection-under-budgets.html"}</script>
@@ -18,7 +25,7 @@
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="06-budget-aware-policies-and-horizon-estimation.html" rel="prev">&laquo; Budget-Aware Policies and Horizon Estimation</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="08-speculation-parallelism-and-commit-protocols.html" rel="next">Speculation, Parallelism, and Commit Protocols &raquo;</a></div>
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="06-budget-aware-policies-and-horizon-estimation.html" rel="prev">&laquo; Budget-Aware Policies and Horizon Estimation</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="08-speculation-parallelism-and-commit-protocols.html" rel="next">Speculation, Parallelism, and Commit Protocols &raquo;</a></div>
 <h1 id="ch:action-selection"><span class="part">Part II: Control and Commitment</span>Chapter 7. Action Selection Under Budgets</h1><p>The cheapest possible agent takes no actions. It never overspends, never violates an invariant, never fabricates a citation, and never helps anyone. This is worth stating at the outset because cost-reduction work drifts toward it. Every optimization in Chapter <a href="05-cost-models-and-critical-paths.html#ch:cost">5</a> pushes in the direction of doing less, and taken to its limit that direction ends in an agent that returns “I was unable to complete this task” very economically. The problem this chapter addresses is <em>allocation</em>: given <span class="math inline">\(B_t\)</span> dollars and a set of candidate actions, which ones buy the most progress while leaving enough to finish?</p>
 <p>Everything here follows from treating the budget as a state variable the policy reads, rather than as a ceiling it discovers by hitting. That single change couples present decisions to future feasibility, and the coupling is what makes the problem interesting and what makes greedy selection fail.</p>
 <h2 id="the-action-selection-problem">7.1 The Action Selection Problem</h2>
@@ -44,7 +51,7 @@
 <figcaption><strong>Figure 7.1.</strong> Slack damping. With positive slack, an action’s value density is scaled down in proportion to how much of the surplus it would consume, reaching full weight once the slack covers its cost. With negative slack, an exponential penalty drives expensive actions out of consideration.</figcaption>
 </figure>
 <figure>
-<img src="figures/07-action-selection-under-budgets-alg1-6dae1ae3d8.png" />
+<img src="figures/07-action-selection-under-budgets-alg1-6dae1ae3d8.png" alt="figure" loading="lazy">
 </figure>
 <p>The algorithm estimates the remaining cost and computes the slack. Actions are scored by <em>value density</em>, the ratio of expected utility to cost, which favors actions that produce more progress per unit spent. Slack then modifies the score. With positive slack, expensive actions are dampened in proportion to how much of the surplus they consume. With negative slack, an exponential penalty sharply reduces the score of costly actions, which produces a regime shift: once the agent is over budget in expectation, it enters a conservation mode in which only low-cost actions remain viable. This approximates the effect of a large Lagrange multiplier without computing one.</p>
 <h2 id="model-cascades-and-routing">7.4 Model Cascades and Routing</h2>
@@ -56,7 +63,7 @@
 <h3 id="cascading">7.4.1 Cascading</h3>
 <p>In a cascade, queries pass through a sequence of models ordered by increasing cost, and execution stops as soon as a response is judged sufficient. Let <span class="math inline">\(p_i\)</span> be the probability that model <span class="math inline">\(M_i\)</span> produces an acceptable response given that all earlier models failed. The expected cost is <span class="math display">\[\mathbb{E}[C] = c_1 + (1-p_1)c_2 + (1-p_1)(1-p_2)c_3 + \cdots\]</span> Chen et al. [<a href="#ref-chen2023frugalgpt">2</a>] showed that cascading pays when the cheap model succeeds often enough to justify its inclusion, specifically when <span class="math inline">\(p_1 &gt; c_1 / c_2\)</span>. With typical <span class="math inline">\(10\times\)</span> cost ratios, even modest success rates on the cheap model yield substantial savings.</p>
 <figure>
-<img src="figures/07-action-selection-under-budgets-alg2-76d647f852.png" />
+<img src="figures/07-action-selection-under-budgets-alg2-76d647f852.png" alt="figure" loading="lazy">
 </figure>
 <p>The scoring function <span class="math inline">\(g(q, a)\)</span> estimates response quality without ground truth. It is far cheaper than the models in the cascade, so the decision cost is negligible.</p>
 <h3 id="routing">7.4.2 Routing</h3>
@@ -131,14 +138,14 @@
 <h2 id="remaining-cost-estimation">7.6 Remaining Cost Estimation</h2>
 <p>Slack-based selection depends on an estimate of the cost to complete. A naive estimate extrapolates the total from progress so far, <span class="math inline">\(\hat{C}_{\text{total}} = C_t / p_t\)</span>, and this fails in heterogeneous pipelines. Planning and retrieval are typically cheap; synthesis and verification are expensive; early progress therefore underestimates future cost. A more robust approach decomposes the remaining work by action type.</p>
 <figure>
-<img src="figures/07-action-selection-under-budgets-alg3-366efcd7cf.png" />
+<img src="figures/07-action-selection-under-budgets-alg3-366efcd7cf.png" alt="figure" loading="lazy">
 </figure>
 <p>To guard against tail risk, reservations are based on percentiles rather than means. Reserving <span class="math inline">\(\hat{R} + 0.67\hat{\sigma}\)</span> protects against overruns about 75% of the time.</p>
 <h2 id="latency-constraints">7.7 Latency Constraints</h2>
 <p>Money is one budget. Patience is another, and it is the one users enforce. An agent that answers correctly in ninety seconds has failed an interactive request, and the failure is invisible in every cost metric discussed so far. Worse, the user usually retries, so the system pays twice for the answer nobody waited for. Latency needs its own feasibility check alongside the budget filter.</p>
 <p>Following NVIDIA’s benchmarking methodology [<a href="#ref-nvidia2024benchmarking">9</a>], latency decomposes into two phases. <em>Time to first token</em> (TTFT) is the delay before the first output token; it includes queueing and the prefill phase, in which the model reads the entire prompt, and prefill is compute-bound and scales with input length. <em>Inter-token latency</em> (ITL) is the generation speed; the decoding phase is memory-bandwidth-bound, since for each token the model weights and the key/value cache must be streamed from memory. An action is feasible only if <span class="math display">\[t_{\text{queue}} + t_{\text{prefill}}(N_{\text{in}}) + \hat{N}_{\text{out}} \cdot \text{ITL} \leq L_{\max}.\]</span></p>
 <figure>
-<img src="figures/07-action-selection-under-budgets-alg4-004f400610.png" />
+<img src="figures/07-action-selection-under-budgets-alg4-004f400610.png" alt="figure" loading="lazy">
 </figure>
 <p>Two consequences follow from the decomposition. Prefill scales with input length, so a large retrieved context is a latency cost as well as a token cost, and trimming retrieval helps both. Decode scales with output length, so capping output length is the single most reliable latency lever available.</p>
 <p>Latency constraints frequently select a weaker model than the budget alone would. That is the correct outcome, and it illustrates why feasibility filters belong before the ranking step: an action that cannot finish in time has no expected value to rank.</p>
@@ -150,7 +157,7 @@
 <figcaption><strong>Figure 7.3.</strong> The selection pipeline. Estimation and reservation set the slack; filtering removes what cannot be afforded or cannot finish in time; ranking chooses among the survivors. The filter runs before the model is prompted.</figcaption>
 </figure>
 <figure>
-<img src="figures/07-action-selection-under-budgets-alg5-243d6c7c40.png" />
+<img src="figures/07-action-selection-under-budgets-alg5-243d6c7c40.png" alt="figure" loading="lazy">
 </figure>
 <h2 id="worked-example">7.9 Worked Example</h2>
 <p>Consider an agent with a budget of $0.50 and a latency limit of 30 seconds. After two steps it has spent $0.15 and 10 seconds. The estimated remaining cost is $0.23 with <span class="math inline">\(\sigma = \$0.08\)</span>. Reserving at the 75th percentile gives <span class="math inline">\(R = 0.23 + 0.67 \times 0.08 \approx \$0.28\)</span>. The remaining budget is $0.35, so the slack is $0.07.</p>

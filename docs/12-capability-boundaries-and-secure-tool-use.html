@@ -3,14 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Chapter 12: Capability Boundaries and Secure Tool Use — Agent Algorithmics</title>
+<title>Chapter 12: Capability Boundaries and Secure Tool Use | Agent Algorithmics</title>
 <meta name="description" content="Give a model a tool and you have changed what it is. An oracle that answers questions becomes an actor that sends the email, runs the code, edits the…">
 <meta name="author" content="Madhava Gaikwad">
 <meta name="robots" content="index,follow">
 <meta property="og:type" content="book">
-<meta property="og:title" content="Chapter 12: Capability Boundaries and Secure Tool Use — Agent Algorithmics">
+<meta property="og:title" content="Chapter 12: Capability Boundaries and Secure Tool Use | Agent Algorithmics">
 <meta property="og:description" content="Give a model a tool and you have changed what it is. An oracle that answers questions becomes an actor that sends the email, runs the code, edits the…">
 <meta property="og:url" content="https://krimler.github.io/agent-algorithmics/12-capability-boundaries-and-secure-tool-use.html">
+<meta property="og:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<meta property="og:site_name" content="Agent Algorithmics">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Chapter 12: Capability Boundaries and Secure Tool Use | Agent Algorithmics">
+<meta name="twitter:description" content="Give a model a tool and you have changed what it is. An oracle that answers questions becomes an actor that sends the email, runs the code, edits the…">
+<meta name="twitter:image" content="https://krimler.github.io/agent-algorithmics/cover-front.jpg">
+<link rel="alternate" type="application/pdf" href="agent-algorithmics.pdf" title="PDF edition">
 <link rel="canonical" href="https://krimler.github.io/agent-algorithmics/12-capability-boundaries-and-secure-tool-use.html">
 <link rel="stylesheet" href="style.css">
 <script type="application/ld+json">{"@context": "https://schema.org", "@type": "Chapter", "name": "Capability Boundaries and Secure Tool Use", "author": {"@type": "Person", "name": "Madhava Gaikwad"}, "isPartOf": {"@type": "Book", "name": "Agent Algorithmics", "author": {"@type": "Person", "name": "Madhava Gaikwad"}}, "position": 12, "url": "https://krimler.github.io/agent-algorithmics/12-capability-boundaries-and-secure-tool-use.html"}</script>
@@ -18,7 +25,7 @@
 </head>
 <body>
 <div id="page">
-<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span> &mdash; Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="11-retrieval-and-evidence-management.html" rel="prev">&laquo; Retrieval and Evidence Management</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="13-alignment-policies-and-constraint-enforcement.html" rel="next">Alignment, Policies, and Constraint Enforcement &raquo;</a></div>
+<div id="top"><span class="book"><a href="index.html">Agent Algorithmics</a></span>: Principles for Cost, Reliability, and Safety in Tool-Using AI Systems<br><a href="11-retrieval-and-evidence-management.html" rel="prev">&laquo; Retrieval and Evidence Management</a> &nbsp;|&nbsp; <a href="index.html">Contents</a> &nbsp;|&nbsp; <a href="13-alignment-policies-and-constraint-enforcement.html" rel="next">Alignment, Policies, and Constraint Enforcement &raquo;</a></div>
 <h1 id="ch:capability"><span class="part">Part II: Control and Commitment</span>Chapter 12. Capability Boundaries and Secure Tool Use</h1><p>Give a model a tool and you have changed what it is. An oracle that answers questions becomes an actor that sends the email, runs the code, edits the database, moves the money. Every tool is an attack surface, and every invocation is a trust decision, made several times a second, mostly by a component that was optimized to be helpful.</p>
 <p>This chapter develops capability-based security for agents. We draw on operating systems (capability tokens, sandboxing, privilege rings), distributed systems (delegation, revocation), and security engineering (least privilege, defense in depth). The goal is an agent that can use tools effectively while remaining confined to authorized actions, even when it faces adversarial input, prompt injection, or unexpected tool behavior. The treatment is concrete: we specify capability data structures, derive an authorization algorithm, analyze attack vectors, and develop defenses with quantifiable properties.</p>
 <h2 id="the-tool-security-problem">12.1 The Tool Security Problem</h2>
@@ -116,7 +123,7 @@
 <h3 id="authorization-algorithm">12.2.3 Authorization Algorithm</h3>
 <p>When an agent requests a tool invocation, the authorization layer decides whether the request is permitted. The correct default is to deny unless a token explicitly authorizes.</p>
 <figure>
-<img src="figures/12-capability-boundaries-and-secure-tool-use-alg1-12cec43b9e.png" />
+<img src="figures/12-capability-boundaries-and-secure-tool-use-alg1-12cec43b9e.png" alt="figure" loading="lazy">
 </figure>
 <p>The algorithm fails closed: any validation failure results in denial, which is the correct default for security-critical operations.</p>
 <p>The hard part is the semantics of <span class="smallcaps">ConstraintsSatisfied</span>. Typical constraints are schema constraints on argument types and required fields, value constraints (bounds, allowlists, prefixes), rate constraints maintained as sliding-window counters per token and per subject, context constraints (user presence, approval artifacts, authentication state), and <em>provenance constraints</em>, which disallow arguments sourced from untrusted content. The last is critical and often missing. If an agent can copy a string from an untrusted retrieved page into a privileged tool call, a direct injection path exists. Constraint satisfaction must therefore include information-flow conditions as well as value conditions, which is the formal point of Chapter <a href="04-formal-semantics-types-and-contracts.html#ch:semantics">4</a>.</p>
